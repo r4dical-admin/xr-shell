@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "name", "motif", "rationale", "palette", "videoFilter", "roleEffects"],
+  "properties": {
+    "version": { "const": 3 },
+    "name": { "type": "string", "minLength": 3, "maxLength": 80 },
+    "motif": { "type": "string", "pattern": "^[a-z0-9-]{2,32}$" },
+    "rationale": { "type": "string", "minLength": 10, "maxLength": 240 },
+    "palette": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accent", "secondary", "surface", "line", "ink"],
+      "properties": {
+        "accent": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+        "secondary": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+        "surface": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+        "line": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+        "ink": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" }
+      }
+    },
+    "videoFilter": {
+      "enum": [
+        "saturate(.72) contrast(1.2) brightness(.82) hue-rotate(9deg)",
+        "saturate(.7) contrast(1.12) brightness(.9) hue-rotate(8deg)",
+        "saturate(.82) contrast(1.18) brightness(.86)",
+        "saturate(.68) contrast(1.24) brightness(.8) hue-rotate(18deg)",
+        "saturate(.9) contrast(1.1) brightness(.9)"
+      ]
+    },
+    "roleEffects": {
+      "type": "object",
+      "additionalProperties": {
+        "enum": ["holographic-control", "luminous-input", "navigation-rail", "energy-track", "telemetry-label", "glass-region"]
+      }
+    }
+  }
+}

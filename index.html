@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; media-src 'self' blob:; style-src 'self'; script-src 'self'" />
+    <title>XR Shell</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="atmosphere" aria-hidden="true"></div>
+    <header class="topbar">
+      <div class="brand"><span>XR / SHELL</span><strong>Spatial desktop</strong></div>
+      <div class="tracking-status"><i></i><span id="tracking-state">Mouse simulation · right-drag to look</span></div>
+      <div class="top-actions">
+        <select id="window-picker" aria-label="Application window"><option value="">Choose an app window…</option></select>
+        <button id="add-window">Add app</button>
+        <select id="display-picker" aria-label="Target display"></select>
+        <button id="open-display">Open XREAL</button>
+        <button id="fullscreen" aria-label="Toggle fullscreen">⛶</button>
+      </div>
+    </header>
+
+    <main id="viewport" class="viewport">
+      <div id="workspace" class="workspace">
+        <section id="app-stage" class="app-stage" aria-label="Live application windows"></section>
+        <section class="zone zone-left">
+          <p class="eyebrow">LIVE WINDOWS</p>
+          <h2>Your tools,<br />inside one horizon.</h2>
+          <article class="glass app-card active">
+            <div class="app-icon">＋</div><div><small>WINDOW CAPTURE</small><strong>Add an app above</strong><p>Choose any open macOS window</p></div><b>READY</b>
+          </article>
+          <article class="glass app-card">
+            <div class="app-icon">◫</div><div><small>LIVE MIRROR</small><strong>Futuristic frame</strong><p>Glow, depth and spatial placement</p></div><b>STYLE</b>
+          </article>
+          <article class="glass app-card">
+            <div class="app-icon">AX</div><div><small>INPUT BRIDGE</small><strong>Accessibility control</strong><p>Interact with the original app</p></div><b>LIVE</b>
+          </article>
+        </section>
+
+        <section class="zone zone-mid-left">
+          <article class="glass agenda">
+            <header><span>TODAY</span><b>4</b></header>
+            <label><input type="checkbox" checked /> Review workspace prototype</label>
+            <label><input type="checkbox" /> Connect XREAL tracking</label>
+            <label><input type="checkbox" /> Test panoramic movement</label>
+            <label><input type="checkbox" /> Map accessibility actions</label>
+          </article>
+          <article class="glass context-card">
+            <small>VIRTUAL CANVAS</small>
+            <strong id="canvas-readout">2.25× physical width</strong>
+            <p>The viewport follows your head while the workspace stays larger than the display.</p>
+          </article>
+        </section>
+
+        <section class="zone zone-center">
+          <div class="orb-wrap" aria-hidden="true">
+            <div class="orb-rings"><i></i><i></i><i></i></div>
+            <div class="orb"><span></span></div>
+            <div class="projector"></div>
+          </div>
+          <div class="welcome"><small>SAME TOOLS. A BIGGER HORIZON.</small><h1>How can I help, Ido?</h1><p>Move your head to explore the workspace.</p></div>
+          <div id="chat-response" class="chat-response glass" aria-live="polite"><small>XR AGENT</small><p>Start a read-only Codex session from the command deck.</p></div>
+          <div class="composer glass"><button id="voice-input" aria-label="Voice input" title="Voice input coming next">◉</button><input id="chat-input" placeholder="Ask anything… code, plan, research, create…" autocomplete="off" /><button id="chat-send" class="send" aria-label="Send message">↗</button></div>
+          <nav class="quick-actions"><button data-prompt="Generate ">Generate</button><button data-prompt="Fix ">Fix</button><button data-prompt="Explain ">Explain</button><button data-prompt="Refactor ">Refactor</button><button data-prompt="Plan ">Plan</button><button data-prompt="Research ">Research</button></nav>
+        </section>
+
+        <section class="zone zone-mid-right">
+          <article class="glass agents">
+            <header><span>ACTIVE AGENTS</span><b>3</b></header>
+            <div><i class="cyan"></i><p><strong>Developer</strong><small>Working on feature branch…</small></p><time>2m</time></div>
+            <div><i class="violet"></i><p><strong>Researcher</strong><small>Searching and summarizing…</small></p><time>5m</time></div>
+            <div><i class="green"></i><p><strong>Planner</strong><small>Breaking down next steps…</small></p><time>1m</time></div>
+          </article>
+          <article class="glass system-card">
+            <small>TRACKING PIPELINE</small>
+            <strong>One Pro · 3DoF</strong>
+            <p>USB Ethernet → IMU fusion → quaternion → damped panoramic translation.</p>
+          </article>
+        </section>
+
+        <section class="zone zone-right">
+          <article class="glass blueprint"><div class="ship">◇</div><p>EXPLORE<br />BUILD<br />LEARN<br />REPEAT</p></article>
+          <article class="glass sessions">
+            <header><span>CODEX SESSIONS</span><button id="new-session" type="button">＋ NEW</button></header>
+            <div id="session-list" class="session-list"></div>
+          </article>
+        </section>
+      </div>
+    </main>
+
+    <footer class="controls">
+      <div class="control-group">
+        <button id="connect">◎ Connect XREAL</button>
+        <button id="recenter">Recenter</button>
+        <button id="enable-input">Enable app input</button>
+      </div>
+      <label>Canvas width <output id="scale-output">2.25×</output><input id="scale" type="range" min="1.5" max="3.5" value="2.25" step="0.25" /></label>
+      <div class="minimap" aria-label="Workspace position"><div id="minimap-view"></div></div>
+      <span class="hint">Right-drag or use ← → to simulate head movement</span>
+    </footer>
+    <script src="renderer.js"></script>
+  </body>
+</html>
