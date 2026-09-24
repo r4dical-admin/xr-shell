@@ -95,7 +95,7 @@ let sessions = [];
 let activeSessionId = null;
 let intensityPanel = null;
 let intensityBeforePreview = 60;
-let intensityEnabledBeforePreview = true;
+let intensityModeBeforePreview = 'theme';
 try { sessions = JSON.parse(localStorage.getItem('xr-shell:sessions') || '[]'); } catch { sessions = []; }
 
 const keyCodes = {
@@ -173,27 +173,25 @@ async function captureWindow(source) {
   const panel = document.createElement('article');
   panel.className = 'captured-window glass';
   panel.innerHTML = `
-    <header title="Drag to move this window in the workspace"><div class="capture-title">${source.appIcon ? `<img src="${source.appIcon}" alt="" />` : '<i></i>'}<div><small>HOLOGRAPHIC WINDOW LINK · GRAB TO MOVE</small><span>${escapeHtml(source.name)}</span></div></div><div class="capture-actions"><em>● LIVE</em><button type="button" data-profile aria-label="Learn accessibility profile">AX</button><button type="button" data-theme aria-label="Toggle generated theme" title="No generated theme yet">THEME —</button><button type="button" data-front aria-label="Bring window to front">FRONT</button><button type="button" data-smaller aria-label="Make window smaller">−</button><button type="button" data-larger aria-label="Make window larger">+</button><button type="button" data-fx>FX</button><button type="button" data-remove class="release-app" aria-label="Release app from XR workspace" title="Stop mirroring and release this app from XR Shell">RELEASE</button></div></header>
+    <header title="Drag to move this window in the workspace"><div class="capture-title">${source.appIcon ? `<img src="${source.appIcon}" alt="" />` : '<i></i>'}<div><small>HOLOGRAPHIC WINDOW LINK · GRAB TO MOVE</small><span>${escapeHtml(source.name)}</span></div></div><div class="capture-actions"><em>● LIVE</em><button type="button" data-profile aria-label="Learn accessibility profile">AX</button><button type="button" data-visual-mode aria-label="Cycle visual mode" title="Cycle FX and passthrough modes">FX</button><button type="button" data-front aria-label="Bring window to front">FRONT</button><button type="button" data-smaller aria-label="Make window smaller">−</button><button type="button" data-larger aria-label="Make window larger">+</button><button type="button" data-remove class="release-app" aria-label="Release app from XR workspace" title="Stop mirroring and release this app from XR Shell">RELEASE</button></div></header>
     <div class="capture-viewport">${source.thumbnail ? `<img class="capture-placeholder" src="${source.thumbnail}" alt="Preview of ${escapeHtml(source.name)}" />` : '<div class="capture-empty"><strong>SCREEN RECORDING REQUIRED</strong>Allow access in Privacy & Security, then add this window again.</div>'}<div class="semantic-layer" aria-hidden="true"></div><div class="xr-cursor" aria-hidden="true"><i></i></div><div class="capture-overlay"><i></i><i></i><i></i><i></i><span>OPTICAL FEED · SECURE</span></div></div>
     <footer><span>30 FPS · GLASS-02 · MIRRORED SURFACE</span><b>DRAG CORNER TO RESIZE</b></footer><div class="resize-grip" title="Drag to resize" aria-hidden="true"></div>`;
   appStage.append(panel);
   const captured = { panel, stream: null, profiling: false, profileEndsAt: 0, theme: null, spatialCleanup: null };
   capturedWindows.set(source.id, captured);
+  setVisualMode(panel, 'fx', false);
   window.horizon.themeForApp(source.name).then((theme) => {
     if (theme && capturedWindows.has(source.id)) applyProfileTheme(panel, theme);
   });
   panel.querySelector('.capture-viewport').classList.toggle('input-enabled', inputEnabled);
   panel.querySelector('[data-remove]').addEventListener('click', () => removeCapturedWindow(source.id));
-  panel.querySelector('[data-fx]').addEventListener('click', () => panel.classList.toggle('clean'));
   bindCapturedInput(source.id, panel);
   bindSpatialControls(source.id, panel);
   bindProfileControls(source.id, panel);
-  panel.querySelector('[data-theme]').addEventListener('click', () => {
-    if (!panel.xrTheme) {
-      trackingState.textContent = 'No generated theme yet · press AX to learn this app';
-      return;
-    }
-    setThemeEnabled(panel, !panel.classList.contains('profile-themed'));
+  panel.querySelector('[data-visual-mode]').addEventListener('click', () => {
+    const modes = panel.xrTheme ? ['theme', 'fx', 'pass'] : ['fx', 'pass'];
+    const currentIndex = Math.max(0, modes.indexOf(panel.visualMode));
+    setVisualMode(panel, modes[(currentIndex + 1) % modes.length]);
   });
   panel.querySelector('[data-front]').addEventListener('click', () => bringCaptureToFront(source.id, panel));
   layoutCapturedWindows();
@@ -263,7 +261,7 @@ function applyProfileTheme(panel, theme) {
   panel.style.setProperty('--profile-video-filter', theme.videoFilter);
   const preference = readThemePreference(theme);
   setThemeIntensity(panel, preference.intensity, false);
-  setThemeEnabled(panel, preference.enabled, false);
+  setVisualMode(panel, preference.mode, false);
 }
 
 function themePreferenceKey(theme) {
@@ -273,15 +271,16 @@ function themePreferenceKey(theme) {
 function readThemePreference(theme) {
   try {
     const saved = JSON.parse(localStorage.getItem(themePreferenceKey(theme)) || '{}');
-    return { intensity: clamp(Number(saved.intensity) || 60, 15, 100), enabled: saved.enabled !== false };
-  } catch { return { intensity: 60, enabled: true }; }
+    const mode = ['theme', 'fx', 'pass'].includes(saved.mode) ? saved.mode : saved.enabled === false ? 'fx' : 'theme';
+    return { intensity: clamp(Number(saved.intensity) || 60, 15, 100), mode };
+  } catch { return { intensity: 60, mode: 'theme' }; }
 }
 
 function saveThemePreference(panel) {
   if (!panel.xrTheme) return;
   localStorage.setItem(themePreferenceKey(panel.xrTheme), JSON.stringify({
     intensity: panel.themeIntensity || 60,
-    enabled: panel.classList.contains('profile-themed')
+    mode: panel.visualMode || 'fx'
   }));
 }
 
@@ -301,28 +300,31 @@ function setThemeIntensity(panel, value, persist = true) {
   panel.style.setProperty('--theme-mix', `${Math.round(7 + strength * 25)}%`);
   panel.style.setProperty('--theme-inner-mix', `${Math.round(5 + strength * 14)}%`);
   if (persist) saveThemePreference(panel);
-  const button = panel.querySelector('[data-theme]');
+  const button = panel.querySelector('[data-visual-mode]');
   if (panel.xrTheme) button.title = `${panel.xrTheme.name} · ${intensityDescription(intensity)} ${Math.round(intensity)}% · click to toggle`;
 }
 
-function setThemeEnabled(panel, enabled, persist = true) {
-  const available = Boolean(panel.xrTheme);
-  const active = available && enabled;
-  panel.classList.toggle('profile-themed', active);
-  const button = panel.querySelector('[data-theme]');
-  button.classList.toggle('active', active);
-  button.textContent = available ? `THEME ${active ? 'ON' : 'OFF'}` : 'THEME —';
-  button.title = available ? `${panel.xrTheme.name} · ${intensityDescription(panel.themeIntensity || 60)} ${Math.round(panel.themeIntensity || 60)}% · click to compare ${active ? 'original' : 'themed'} view` : 'No generated theme yet';
-  panel.querySelector('.capture-title small').textContent = active
-    ? `${String(panel.xrTheme.name || 'XR PROFILE').toUpperCase()} · THEME ON`
-    : 'HOLOGRAPHIC WINDOW LINK · THEME OFF';
-  trackingState.textContent = available ? `${panel.xrTheme.name} · theme ${active ? 'enabled' : 'disabled'}` : trackingState.textContent;
+function setVisualMode(panel, requestedMode, persist = true) {
+  const mode = requestedMode === 'theme' && !panel.xrTheme ? 'fx' : ['theme', 'fx', 'pass'].includes(requestedMode) ? requestedMode : 'fx';
+  panel.visualMode = mode;
+  panel.classList.toggle('profile-themed', mode === 'theme');
+  panel.classList.toggle('clean', mode === 'pass');
+  const button = panel.querySelector('[data-visual-mode]');
+  button.dataset.mode = mode;
+  button.textContent = mode === 'theme' ? 'THEME' : mode === 'pass' ? 'PASS' : 'FX';
+  button.title = mode === 'theme'
+    ? `${panel.xrTheme.name} · ${intensityDescription(panel.themeIntensity || 60)} ${Math.round(panel.themeIntensity || 60)}% · click for FX`
+    : mode === 'fx' ? 'Generic holographic FX · click for passthrough' : `Passthrough view · click for ${panel.xrTheme ? 'theme' : 'FX'}`;
+  panel.querySelector('.capture-title small').textContent = mode === 'theme'
+    ? `${String(panel.xrTheme.name || 'XR PROFILE').toUpperCase()} · THEME`
+    : mode === 'fx' ? 'HOLOGRAPHIC WINDOW LINK · FX' : 'ORIGINAL APP VIEW · PASSTHROUGH';
+  trackingState.textContent = `${panel.xrTheme?.name || 'App'} · ${mode === 'pass' ? 'passthrough' : mode} mode`;
   if (persist) saveThemePreference(panel);
 }
 
 function updateIntensityPreview(value) {
   if (!intensityPanel) return;
-  setThemeEnabled(intensityPanel, true, false);
+  setVisualMode(intensityPanel, 'theme', false);
   setThemeIntensity(intensityPanel, value, false);
   intensityLabel.value = `${intensityDescription(Number(value))} · ${Math.round(Number(value))}%`;
 }
@@ -333,7 +335,7 @@ function showThemeIntensity(panel, appName) {
   if (intensityDialog.open) intensityDialog.close();
   intensityPanel = panel;
   intensityBeforePreview = panel.themeIntensity || 60;
-  intensityEnabledBeforePreview = panel.classList.contains('profile-themed');
+  intensityModeBeforePreview = panel.visualMode || 'theme';
   intensityTitle.textContent = `How much should ${appName || 'this app'} be reskinned?`;
   intensityInput.value = String(intensityBeforePreview);
   updateIntensityPreview(intensityBeforePreview);
@@ -343,7 +345,7 @@ function showThemeIntensity(panel, appName) {
 function closeIntensity(restore) {
   if (restore && intensityPanel) {
     setThemeIntensity(intensityPanel, intensityBeforePreview, false);
-    setThemeEnabled(intensityPanel, intensityEnabledBeforePreview, false);
+    setVisualMode(intensityPanel, intensityModeBeforePreview, false);
   }
   intensityDialog.close();
   intensityPanel = null;
@@ -358,11 +360,11 @@ function removeDeletedProfileTheme(appName) {
   for (const captured of capturedWindows.values()) {
     const title = captured.panel.querySelector('.capture-title span')?.textContent || '';
     if (!title.toLowerCase().includes(String(appName).toLowerCase())) continue;
-    setThemeEnabled(captured.panel, false, false);
+    setVisualMode(captured.panel, 'fx', false);
     captured.panel.xrTheme = null;
     captured.panel.removeAttribute('data-motif');
-    captured.panel.querySelector('[data-theme]').textContent = 'THEME —';
-    captured.panel.querySelector('[data-theme]').title = 'No generated theme yet';
+    captured.panel.querySelector('[data-visual-mode]').textContent = 'FX';
+    captured.panel.querySelector('[data-visual-mode]').title = 'Generic holographic FX · click for passthrough';
   }
 }
 
@@ -1145,14 +1147,14 @@ intensityDialog.querySelector('[data-intensity-close]').addEventListener('click'
 intensityDialog.querySelector('[data-intensity-off]').addEventListener('click', () => {
   if (intensityPanel) {
     setThemeIntensity(intensityPanel, intensityInput.value, false);
-    setThemeEnabled(intensityPanel, false, true);
+    setVisualMode(intensityPanel, 'pass', true);
   }
   closeIntensity(false);
 });
 intensityDialog.querySelector('[data-intensity-apply]').addEventListener('click', () => {
   if (intensityPanel) {
     setThemeIntensity(intensityPanel, intensityInput.value, false);
-    setThemeEnabled(intensityPanel, true, true);
+    setVisualMode(intensityPanel, 'theme', true);
   }
   closeIntensity(false);
 });

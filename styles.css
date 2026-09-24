@@ -74,7 +74,10 @@ button:hover { border-color: rgba(115, 230, 255, .7); background: rgba(16, 49, 6
 .capture-actions em { color: #68dda2; font-size: 8px; font-style: normal; letter-spacing: .2em; }
 .captured-window header button { border: 1px solid rgba(86, 215, 255, .18); background: rgba(53, 170, 210, .06); padding: 6px 9px; color: #86a5b5; font-size: 10px; }
 .captured-window header button.active { color: #8ff0ff; border-color: rgba(95, 224, 255, .72); background: rgba(32, 173, 218, .22); box-shadow: 0 0 14px rgba(65, 211, 255, .2); }
-.captured-window header button[data-theme] { min-width: 64px; }
+.captured-window header button[data-visual-mode] { min-width: 58px; }
+.captured-window header button[data-visual-mode][data-mode="theme"] { color: #8ff0ff; border-color: rgba(95,224,255,.72); background: rgba(32,173,218,.22); box-shadow: 0 0 14px rgba(65,211,255,.2); }
+.captured-window header button[data-visual-mode][data-mode="fx"] { color: #baa7ff; border-color: rgba(155,127,255,.45); background: rgba(107,78,211,.12); }
+.captured-window header button[data-visual-mode][data-mode="pass"] { color: #8ca1ac; background: rgba(25,42,51,.18); }
 .captured-window header button[data-front].active { color: #81f0b5; border-color: rgba(91,229,167,.65); background: rgba(32,173,112,.16); }
 .captured-window header button.release-app { color: #d795a1; border-color: rgba(255,111,133,.24); }
 .captured-window header button.release-app:hover { color: #ffb3bf; border-color: rgba(255,111,133,.58); background: rgba(201,46,72,.14); }
