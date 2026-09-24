@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('horizon', {
   inputStatus: () => ipcRenderer.invoke('input:status'),
   enableInput: () => ipcRenderer.invoke('input:enable'),
   openInputSettings: () => ipcRenderer.invoke('input:open-settings'),
+  menuSnapshot: (sourceId) => ipcRenderer.invoke('menu:snapshot', sourceId),
+  activateMenu: (sourceId, menuPath) => ipcRenderer.invoke('menu:activate', sourceId, menuPath),
   toggleProfile: (sourceId, enabled) => ipcRenderer.invoke('profile:toggle', sourceId, enabled),
   themeForApp: (appName) => ipcRenderer.invoke('profile:theme-for-app', appName),
   listProfiles: () => ipcRenderer.invoke('profile:list'),
@@ -41,6 +43,12 @@ contextBridge.exposeInMainWorld('horizon', {
     ipcRenderer.on('input:error', listener);
     return () => ipcRenderer.removeListener('input:error', listener);
   },
+  onControlRequest: (callback) => {
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('control:request', listener);
+    return () => ipcRenderer.removeListener('control:request', listener);
+  },
+  respondControl: (response) => ipcRenderer.send('control:response', response),
   listDisplays: () => ipcRenderer.invoke('display:list'),
   listWindows: () => ipcRenderer.invoke('window:list'),
   capturePermission: () => ipcRenderer.invoke('capture:permission'),

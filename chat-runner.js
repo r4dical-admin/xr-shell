@@ -10,15 +10,20 @@ class ChatRunner {
     this.workingDirectory = workingDirectory;
     this.onEvent = onEvent;
     this.processes = new Map();
+    this.mcpServer = path.join(workingDirectory, 'mcp', 'server.js');
   }
 
   send({ clientId, threadId, prompt }) {
     const text = String(prompt || '').trim().slice(0, 12000);
     if (!clientId || !text) return { accepted: false, error: 'invalid-chat-request' };
     if (this.processes.has(clientId)) return { accepted: false, error: 'session-busy' };
+    const mcpConfig = [
+      '-c', 'mcp_servers.xr_shell.command="node"',
+      '-c', `mcp_servers.xr_shell.args=[${JSON.stringify(this.mcpServer)}]`
+    ];
     const args = threadId
-      ? ['exec', '-c', 'approval_policy="never"', 'resume', '--json', '--skip-git-repo-check', threadId, text]
-      : ['exec', '-c', 'approval_policy="never"', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '-C', this.workingDirectory, text];
+      ? ['exec', '-c', 'approval_policy="never"', ...mcpConfig, 'resume', '--json', '--skip-git-repo-check', threadId, text]
+      : ['exec', '-c', 'approval_policy="never"', ...mcpConfig, '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '-C', this.workingDirectory, text];
     const child = spawn(this.cli, args, { cwd: this.workingDirectory, stdio: ['ignore', 'pipe', 'pipe'] });
     this.processes.set(clientId, child);
     this.onEvent({ clientId, type: 'status', status: 'starting' });

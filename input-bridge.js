@@ -40,7 +40,7 @@ class InputBridge {
       const timeout = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error('Input bridge timed out'));
-      }, command.type === 'snapshot' ? 8000 : 2500);
+      }, ['snapshot', 'menu-snapshot'].includes(command.type) ? 8000 : 4000);
       this.pending.set(id, { resolve, reject, timeout });
       this.process.stdin.write(`${JSON.stringify({ ...command, id })}\n`);
     });

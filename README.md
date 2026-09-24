@@ -27,6 +27,29 @@ The central command deck starts real Codex CLI sessions in a read-only sandbox. 
 Captured windows expose a three-way **THEME → FX → PASS** visual control and a **FRONT** control. Theme uses the learned app profile, FX uses the generic holographic shell treatment, and Pass shows a near-original view. Apps without a learned theme cycle between FX and Pass. The window selector refreshes from active macOS windows every two seconds and can be refreshed manually. Width and height controls independently size the panoramic canvas. Codex sessions can be created, resumed, and removed from the session rail; removing a running session stops its local process.
 The explicit **RELEASE** control stops mirroring and removes a captured window from XR Shell without closing the original macOS app.
 
+The frontmost captured application also owns one shared menu bar near the top of the XR workspace. It mirrors the app's real macOS **File / Edit / View / Help** menus through Accessibility, supports nested items and shortcuts, and sends selected commands back to the original app. Drag the dotted handle to place the menu bar anywhere in XR space. Switching the frontmost window switches the shared menu automatically.
+
+## Local MCP control
+
+XR Shell includes a zero-dependency local MCP server. XR Shell must be running; the MCP process connects through a user-only Unix socket and never opens a network port.
+
+Configure any MCP client to launch:
+
+```json
+{
+  "mcpServers": {
+    "xr-shell": {
+      "command": "node",
+      "args": ["/Users/ido/Documents/xr-shell/mcp/server.js"]
+    }
+  }
+}
+```
+
+The server exposes `xr_shell_list_apps`, `xr_shell_get_layout`, `xr_shell_pull_app`, `xr_shell_focus_app`, `xr_shell_transform_app`, and `xr_shell_release_app`. Apps can be addressed by the source ID returned from the list tool or by a case-insensitive window-name query. Transform coordinates are pixel offsets from the app's automatic layout slot; width and height are pixels constrained to the visible XR workspace.
+
+XR Shell's built-in Codex chat attaches this MCP server automatically, so requests such as “bring Terminal into the workspace, place it 200 pixels left, and make it 800 × 600” can be handled through the same explicit controls. Other local agents can use the configuration above.
+
 When profile learning finishes, XR Shell opens an intensity preview from **Light** to **Extreme** and remembers the choice for that theme. The top-bar **Profiles** library can inspect the complete local profile or its recording-derived AX summary, clear recording data while preserving the theme, or delete the entire profile.
 
 For live tracking, connect the One Pro directly over USB-C, enable Ethernet in its developer menu, use flat Follow display mode, click **Connect XREAL**, hold still while calibration completes, and press **Recenter** while facing forward.
@@ -38,6 +61,8 @@ For live tracking, connect the One Pro directly over USB-C, enable Ethernet in i
 - Live capture of up to three existing macOS application windows.
 - Native pointer, drag, scroll, text, shortcut and navigation-key forwarding to captured windows.
 - Direct spatial repositioning and constrained resizing for every captured surface.
+- A shared, draggable Accessibility-backed macOS application menu for the frontmost captured app.
+- A standalone local MCP server for agent-driven app discovery, capture, focus, placement, sizing and release.
 - Per-application Accessibility inventory and locally generated integration profiles.
 - Live role-aware holographic overlays and learned UI event capabilities.
 - Explicit macOS Accessibility permission boundary; input is disabled until the user grants access.

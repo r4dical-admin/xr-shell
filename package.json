@@ -10,6 +10,7 @@
     "prestart": "npm run build:input-bridge",
     "start": "electron .",
     "capture": "HORIZON_CAPTURE=1 electron .",
+    "mcp": "node mcp/server.js",
     "test": "node --test",
     "check": "npm test"
   },

@@ -72,6 +72,10 @@ const profileLibraryList = document.getElementById('profile-library-list');
 const profileLibraryDetail = document.getElementById('profile-library-detail');
 const liveWindowSummary = document.getElementById('live-window-summary');
 const liveWindowCount = document.getElementById('live-window-count');
+const spatialMenuBar = document.getElementById('spatial-menubar');
+const menuAppName = document.getElementById('menu-app-name');
+const menuRoot = document.getElementById('menu-root');
+const menuState = document.getElementById('menu-state');
 
 const headView = new HeadView();
 const pitchStabilizer = new PitchStabilizer();
@@ -96,6 +100,7 @@ let activeSessionId = null;
 let intensityPanel = null;
 let intensityBeforePreview = 60;
 let intensityModeBeforePreview = 'theme';
+let menuRefreshSequence = 0;
 try { sessions = JSON.parse(localStorage.getItem('xr-shell:sessions') || '[]'); } catch { sessions = []; }
 
 const keyCodes = {
@@ -164,7 +169,11 @@ async function loadWindows(force = false) {
 }
 
 async function captureWindow(source) {
-  if (!source || capturedWindows.has(source.id)) return;
+  if (!source) return null;
+  if (capturedWindows.has(source.id)) {
+    bringCaptureToFront(source.id, capturedWindows.get(source.id).panel);
+    return capturedWindows.get(source.id);
+  }
   if (capturedWindows.size >= 3) {
     trackingState.textContent = 'POC limit reached · remove a window before adding another';
     return;
@@ -177,7 +186,7 @@ async function captureWindow(source) {
     <div class="capture-viewport">${source.thumbnail ? `<img class="capture-placeholder" src="${source.thumbnail}" alt="Preview of ${escapeHtml(source.name)}" />` : '<div class="capture-empty"><strong>SCREEN RECORDING REQUIRED</strong>Allow access in Privacy & Security, then add this window again.</div>'}<div class="semantic-layer" aria-hidden="true"></div><div class="xr-cursor" aria-hidden="true"><i></i></div><div class="capture-overlay"><i></i><i></i><i></i><i></i><span>OPTICAL FEED · SECURE</span></div></div>
     <footer><span>30 FPS · GLASS-02 · MIRRORED SURFACE</span><b>DRAG CORNER TO RESIZE</b></footer><div class="resize-grip" title="Drag to resize" aria-hidden="true"></div>`;
   appStage.append(panel);
-  const captured = { panel, stream: null, profiling: false, profileEndsAt: 0, theme: null, spatialCleanup: null };
+  const captured = { source, panel, stream: null, profiling: false, profileEndsAt: 0, theme: null, spatialCleanup: null };
   capturedWindows.set(source.id, captured);
   setVisualMode(panel, 'fx', false);
   window.horizon.themeForApp(source.name).then((theme) => {
@@ -225,6 +234,7 @@ async function captureWindow(source) {
       ? 'Screen Recording denied · enable it in System Settings'
       : 'Could not start live capture · preview retained';
   }
+  return captured;
 }
 
 function removeCapturedWindow(id) {
@@ -240,6 +250,7 @@ function removeCapturedWindow(id) {
   layoutCapturedWindows();
   const remaining = [...capturedWindows.entries()].at(-1);
   if (remaining) bringCaptureToFront(remaining[0], remaining[1].panel);
+  else refreshSpatialMenu();
   centerWorkspace();
   trackingState.textContent = 'App released from XR workspace · original macOS app remains open';
 }
@@ -428,6 +439,7 @@ async function renderProfileLibrary() {
 }
 
 function bringCaptureToFront(sourceId, panel) {
+  activeCaptureId = sourceId;
   frontOrder += 1;
   for (const [id, captured] of capturedWindows) {
     const isFront = id === sourceId;
@@ -437,6 +449,149 @@ function bringCaptureToFront(sourceId, panel) {
     button.textContent = isFront ? '● FRONT' : 'FRONT';
   }
   panel.style.zIndex = String(100 + frontOrder);
+  refreshSpatialMenu(sourceId);
+}
+
+function menuShortcut(item) {
+  const symbols = { control: '⌃', option: '⌥', shift: '⇧', command: '⌘' };
+  const modifiers = (item.modifiers || []).map((modifier) => symbols[modifier] || '').join('');
+  return `${modifiers}${item.command || ''}`;
+}
+
+function closeSpatialMenus() {
+  menuRoot.querySelectorAll('.spatial-menu-group.open').forEach((group) => group.classList.remove('open'));
+}
+
+function buildSpatialMenuItems(items, sourceId) {
+  const list = document.createElement('ul');
+  list.className = 'spatial-menu-list';
+  for (const item of items || []) {
+    const row = document.createElement('li');
+    if (item.separator) {
+      row.className = 'spatial-menu-separator';
+      list.append(row);
+      continue;
+    }
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.disabled = item.enabled === false;
+    const mark = document.createElement('span');
+    mark.className = 'menu-mark';
+    mark.textContent = item.mark || '';
+    const label = document.createElement('span');
+    label.className = 'menu-label';
+    label.textContent = item.title || 'Untitled';
+    const shortcut = document.createElement('kbd');
+    shortcut.textContent = menuShortcut(item);
+    button.append(mark, label, shortcut);
+    if (item.items?.length) {
+      row.className = 'has-submenu';
+      const arrow = document.createElement('span');
+      arrow.className = 'submenu-arrow';
+      arrow.textContent = '›';
+      button.append(arrow);
+      row.append(button, buildSpatialMenuItems(item.items, sourceId));
+    } else {
+      button.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        closeSpatialMenus();
+        menuState.textContent = 'EXECUTING';
+        const result = await window.horizon.activateMenu(sourceId, item.path);
+        menuState.textContent = result.ok ? 'COMMAND SENT' : 'ACTION FAILED';
+        setTimeout(() => refreshSpatialMenu(sourceId), 250);
+      });
+      row.append(button);
+    }
+    list.append(row);
+  }
+  return list;
+}
+
+function renderSpatialMenu(snapshot, sourceId) {
+  if (sourceId !== activeCaptureId || !capturedWindows.has(sourceId)) return;
+  const captured = capturedWindows.get(sourceId);
+  spatialMenuBar.hidden = false;
+  menuAppName.textContent = snapshot.app?.name || captured.source?.name || 'APP';
+  menuState.textContent = snapshot.ok ? 'AX MENU · LIVE' : 'AX ACCESS NEEDED';
+  menuRoot.replaceChildren();
+  for (const menu of snapshot.menus || []) {
+    const group = document.createElement('div');
+    group.className = 'spatial-menu-group';
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'spatial-menu-trigger';
+    trigger.textContent = menu.title;
+    trigger.disabled = menu.enabled === false;
+    trigger.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const willOpen = !group.classList.contains('open');
+      closeSpatialMenus();
+      group.classList.toggle('open', willOpen);
+    });
+    group.append(trigger, buildSpatialMenuItems(menu.items, sourceId));
+    menuRoot.append(group);
+  }
+  const theme = captured.panel.xrTheme;
+  spatialMenuBar.style.setProperty('--menu-accent', theme?.palette?.accent || '#54ddff');
+  spatialMenuBar.style.setProperty('--menu-surface', theme?.palette?.surface || '#061620');
+}
+
+async function refreshSpatialMenu(sourceId = activeCaptureId) {
+  const sequence = ++menuRefreshSequence;
+  if (!sourceId || !capturedWindows.has(sourceId)) {
+    spatialMenuBar.hidden = true;
+    menuRoot.replaceChildren();
+    return;
+  }
+  const captured = capturedWindows.get(sourceId);
+  if (sourceId === 'preview-window') return;
+  menuAppName.textContent = captured.source?.name || 'APP';
+  spatialMenuBar.hidden = false;
+  menuState.textContent = 'READING MENU';
+  try {
+    const snapshot = await window.horizon.menuSnapshot(sourceId);
+    if (sequence !== menuRefreshSequence) return;
+    renderSpatialMenu(snapshot, sourceId);
+  } catch {
+    if (sequence !== menuRefreshSequence) return;
+    renderSpatialMenu({ ok: false, menus: [] }, sourceId);
+  }
+}
+
+function bindSpatialMenuDrag() {
+  const handle = spatialMenuBar.querySelector('.menu-drag');
+  let gesture = null;
+  const finish = (event = {}) => {
+    if (!gesture || (Number.isFinite(event.pointerId) && event.pointerId !== gesture.pointerId)) return;
+    const previous = gesture;
+    gesture = null;
+    spatialMenuBar.classList.remove('dragging');
+    try {
+      if (handle.hasPointerCapture(previous.pointerId)) handle.releasePointerCapture(previous.pointerId);
+    } catch { /* capture can already be gone */ }
+  };
+  handle.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    gesture = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: Number(spatialMenuBar.dataset.x || 0), y: Number(spatialMenuBar.dataset.y || 0) };
+    handle.setPointerCapture(event.pointerId);
+    spatialMenuBar.classList.add('dragging');
+  });
+  handle.addEventListener('pointermove', (event) => {
+    if (!gesture || event.pointerId !== gesture.pointerId) return;
+    if (!(event.buttons & 1)) return finish(event);
+    const x = clamp(gesture.x + event.clientX - gesture.startX, -appStage.clientWidth * .42, appStage.clientWidth * .42);
+    const y = clamp(gesture.y + event.clientY - gesture.startY, -appStage.clientHeight * .35, appStage.clientHeight * .55);
+    spatialMenuBar.dataset.x = String(x);
+    spatialMenuBar.dataset.y = String(y);
+    spatialMenuBar.style.setProperty('--menu-x', `${x}px`);
+    spatialMenuBar.style.setProperty('--menu-y', `${y}px`);
+  });
+  handle.addEventListener('pointerup', finish);
+  handle.addEventListener('pointercancel', finish);
+  handle.addEventListener('lostpointercapture', finish);
+  addEventListener('pointerup', finish, true);
+  addEventListener('blur', finish);
 }
 
 function syncSemanticGeometry(panel) {
@@ -536,6 +691,72 @@ function layoutCapturedWindows() {
     item.panel.style.setProperty('--slot-x', `${position}vw`);
     item.panel.style.setProperty('--tilt', `${position === 0 ? 0 : position < 0 ? 2.5 : -2.5}deg`);
   });
+}
+
+function capturedLayoutItem(sourceId, captured) {
+  return {
+    sourceId,
+    name: captured.source?.name || captured.panel.querySelector('.capture-title span')?.textContent || 'App',
+    active: sourceId === activeCaptureId,
+    x: Number(captured.panel.dataset.offsetX || 0),
+    y: Number(captured.panel.dataset.offsetY || 0),
+    width: captured.panel.offsetWidth,
+    height: captured.panel.offsetHeight,
+    visualMode: captured.panel.visualMode || 'fx'
+  };
+}
+
+function resolveCapturedApp(params = {}) {
+  if (params.sourceId && capturedWindows.has(params.sourceId)) return [params.sourceId, capturedWindows.get(params.sourceId)];
+  const query = String(params.query || '').trim().toLowerCase();
+  if (!query) return null;
+  return [...capturedWindows.entries()].find(([, captured]) => captured.source?.name?.toLowerCase() === query)
+    || [...capturedWindows.entries()].find(([, captured]) => captured.source?.name?.toLowerCase().includes(query));
+}
+
+async function handleAgentControl(method, params = {}) {
+  if (method === 'get_layout') return { activeSourceId: activeCaptureId, windows: [...capturedWindows.entries()].map(([id, captured]) => capturedLayoutItem(id, captured)) };
+  if (method === 'pull_app') {
+    await loadWindows(true);
+    const query = String(params.query || '').trim().toLowerCase();
+    const source = availableWindows.find((item) => item.id === params.sourceId)
+      || availableWindows.find((item) => item.name.toLowerCase() === query)
+      || availableWindows.find((item) => query && item.name.toLowerCase().includes(query));
+    if (!source) throw new Error('No matching open application window');
+    await captureWindow(source);
+    return capturedLayoutItem(source.id, capturedWindows.get(source.id));
+  }
+  const match = resolveCapturedApp(params);
+  if (!match) throw new Error('No matching captured XR application');
+  const [sourceId, captured] = match;
+  if (method === 'release_app') {
+    const released = capturedLayoutItem(sourceId, captured);
+    removeCapturedWindow(sourceId);
+    return { released };
+  }
+  if (method === 'focus_app') {
+    selectCapture(sourceId, captured.panel);
+    return capturedLayoutItem(sourceId, captured);
+  }
+  if (method === 'transform_app') {
+    if (Number.isFinite(params.width) || Number.isFinite(params.height)) {
+      setPanelSize(captured.panel, Number.isFinite(params.width) ? params.width : captured.panel.offsetWidth, Number.isFinite(params.height) ? params.height : captured.panel.offsetHeight);
+    }
+    if (Number.isFinite(params.x)) {
+      const x = clamp(params.x, -appStage.clientWidth * .42, appStage.clientWidth * .42);
+      captured.panel.dataset.offsetX = String(x);
+      captured.panel.style.setProperty('--offset-x', `${x}px`);
+    }
+    if (Number.isFinite(params.y)) {
+      const halfTravel = Math.max(0, (appStage.clientHeight - captured.panel.offsetHeight) / 2 - 8);
+      const y = clamp(params.y, -halfTravel, halfTravel);
+      captured.panel.dataset.offsetY = String(y);
+      captured.panel.style.setProperty('--offset-y', `${y}px`);
+    }
+    bringCaptureToFront(sourceId, captured.panel);
+    return capturedLayoutItem(sourceId, captured);
+  }
+  throw new Error(`Unsupported XR Shell operation: ${method}`);
 }
 
 function eventModifiers(event) {
@@ -1046,10 +1267,17 @@ function animate(now) {
 loadDisplays().catch(() => {
   displayPicker.innerHTML = '<option>Current display</option>';
 });
-Promise.all([loadWindows(), window.horizon.isPreviewMode()]).then(([, previewMode]) => {
+Promise.all([loadWindows(), window.horizon.isPreviewMode()]).then(async ([, previewMode]) => {
   if (!previewMode) return;
   const mock = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#071925"/><stop offset="1" stop-color="#02080d"/></linearGradient></defs><rect width="1200" height="700" fill="url(#g)"/><rect x="36" y="36" width="250" height="628" rx="18" fill="#0a2231" stroke="#2a7795"/><rect x="315" y="36" width="850" height="628" rx="18" fill="#06141e" stroke="#1f5a73"/><g fill="#66dfff" font-family="sans-serif"><text x="62" y="84" font-size="18">CODEX</text><text x="350" y="88" font-size="16">ACTIVE WORKSPACE</text></g><g fill="#88a8b7" font-family="monospace" font-size="15"><text x="62" y="138">Projects</text><text x="62" y="184">Tasks</text><text x="62" y="230">Agents</text><text x="350" y="150">Design a spatial application shell</text><text x="350" y="196">Inspecting workspace mechanics…</text></g><rect x="350" y="560" width="770" height="62" rx="31" fill="#0a2635" stroke="#3cb8e6"/><text x="382" y="598" fill="#91adba" font-family="sans-serif" font-size="16">Ask Codex anything…</text></svg>`;
-  captureWindow({ id: 'preview-window', name: 'Codex · Spatial workspace', appIcon: null, thumbnail: `data:image/svg+xml,${encodeURIComponent(mock)}` });
+  await captureWindow({ id: 'preview-window', name: 'Codex · Spatial workspace', appIcon: null, thumbnail: `data:image/svg+xml,${encodeURIComponent(mock)}` });
+  renderSpatialMenu({ ok: true, app: { name: 'Codex' }, menus: [
+    { title: 'Codex', items: [{ title: 'About Codex', enabled: true, path: [0, 0, 0] }, { separator: true }] },
+    { title: 'File', items: [{ title: 'New Task', enabled: true, command: 'N', modifiers: ['command'], path: [1, 0, 0] }, { title: 'Open…', enabled: true, command: 'O', modifiers: ['command'], path: [1, 0, 1] }] },
+    { title: 'Edit', items: [{ title: 'Undo', enabled: true, command: 'Z', modifiers: ['command'], path: [2, 0, 0] }] },
+    { title: 'View', items: [{ title: 'Spatial Mode', enabled: true, mark: '✓', path: [3, 0, 0] }] },
+    { title: 'Help', items: [{ title: 'XR Shell Help', enabled: true, path: [4, 0, 0] }] }
+  ] }, 'preview-window');
 }).catch(() => {
   windowPicker.innerHTML = '<option>Window capture unavailable</option>';
 });
@@ -1066,6 +1294,18 @@ window.horizon.onInputError((error) => {
   } else if (error === 'source-window-unavailable') {
     trackingState.textContent = 'Original app window is no longer available';
   }
+});
+window.horizon.onControlRequest(async ({ id, method, params }) => {
+  try {
+    const result = await handleAgentControl(method, params);
+    window.horizon.respondControl({ id, ok: true, result });
+  } catch (error) {
+    window.horizon.respondControl({ id, ok: false, error: error.message });
+  }
+});
+bindSpatialMenuDrag();
+document.addEventListener('pointerdown', (event) => {
+  if (!event.target.closest('.spatial-menu-group')) closeSpatialMenus();
 });
 window.horizon.onProfileUpdate(({ sourceId, snapshot, events, profilePath }) => {
   const captured = capturedWindows.get(sourceId);
@@ -1171,6 +1411,9 @@ renderChat(sessions.find((item) => item.clientId === activeSessionId) || null);
 setInterval(() => {
   if (document.visibilityState === 'visible') loadWindows().catch(() => {});
 }, 2000);
+setInterval(() => {
+  if (document.visibilityState === 'visible' && !menuRoot.querySelector('.spatial-menu-group.open')) refreshSpatialMenu();
+}, 3000);
 setInterval(() => {
   for (const captured of capturedWindows.values()) {
     if (!captured.profiling || !captured.profileEndsAt) continue;

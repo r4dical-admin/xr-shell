@@ -445,6 +445,138 @@ static BOOL PostKey(NSDictionary *command, pid_t pid) {
     return YES;
 }
 
+static NSArray *ElementChildren(AXUIElementRef element) {
+    id children = CopyAttribute(element, kAXChildrenAttribute);
+    return [children isKindOfClass:NSArray.class] ? children : @[];
+}
+
+static NSArray<NSString *> *MenuModifiers(id rawModifiers) {
+    if (![rawModifiers isKindOfClass:NSNumber.class]) return @[];
+    UInt32 flags = [rawModifiers unsignedIntValue];
+    NSMutableArray *result = [NSMutableArray array];
+    if (!(flags & kAXMenuItemModifierNoCommand)) [result addObject:@"command"];
+    if (flags & kAXMenuItemModifierShift) [result addObject:@"shift"];
+    if (flags & kAXMenuItemModifierOption) [result addObject:@"option"];
+    if (flags & kAXMenuItemModifierControl) [result addObject:@"control"];
+    return result;
+}
+
+static NSArray *SerializeMenuChildren(AXUIElementRef parent, NSArray<NSNumber *> *parentPath, NSUInteger depth) {
+    if (depth > 5) return @[];
+    NSArray *children = ElementChildren(parent);
+    NSMutableArray *result = [NSMutableArray array];
+    NSUInteger count = MIN(children.count, 160);
+    for (NSUInteger index = 0; index < count; index++) {
+        AXUIElementRef child = (__bridge AXUIElementRef)children[index];
+        NSArray *path = [parentPath arrayByAddingObject:@(index)];
+        NSString *role = CleanString(CopyAttribute(child, kAXRoleAttribute), 80) ?: @"";
+        if ([role isEqualToString:(__bridge NSString *)kAXMenuRole]) {
+            [result addObjectsFromArray:SerializeMenuChildren(child, path, depth + 1)];
+            continue;
+        }
+        if (![role isEqualToString:(__bridge NSString *)kAXMenuItemRole]) continue;
+        NSString *title = CleanString(CopyAttribute(child, kAXTitleAttribute), 160);
+        id enabledObject = CopyAttribute(child, kAXEnabledAttribute);
+        BOOL enabled = ![enabledObject isKindOfClass:NSNumber.class] || [enabledObject boolValue];
+        NSString *mark = CleanString(CopyAttribute(child, kAXMenuItemMarkCharAttribute), 12);
+        NSString *commandCharacter = CleanString(CopyAttribute(child, kAXMenuItemCmdCharAttribute), 12);
+        id commandGlyph = CopyAttribute(child, kAXMenuItemCmdGlyphAttribute);
+        NSArray *subitems = SerializeMenuChildren(child, path, depth + 1);
+        NSMutableDictionary *item = [@{
+            @"path": path,
+            @"title": title ?: @"",
+            @"enabled": @(enabled),
+            @"separator": @(!title.length && !subitems.count),
+            @"items": subitems,
+            @"modifiers": MenuModifiers(CopyAttribute(child, kAXMenuItemCmdModifiersAttribute))
+        } mutableCopy];
+        if (mark) item[@"mark"] = mark;
+        if (commandCharacter) item[@"command"] = commandCharacter;
+        if ([commandGlyph isKindOfClass:NSNumber.class]) item[@"commandGlyph"] = commandGlyph;
+        [result addObject:item];
+    }
+    return result;
+}
+
+static NSDictionary *MenuSnapshot(uint32_t windowID) {
+    pid_t pid = 0;
+    CGRect bounds;
+    if (!WindowDetails(windowID, &pid, &bounds)) return @{@"ok": @NO, @"error": @"source-window-unavailable"};
+    AXUIElementRef application = AXUIElementCreateApplication(pid);
+    AXUIElementSetMessagingTimeout(application, 1.2);
+    id menuBarObject = CopyAttribute(application, kAXMenuBarAttribute);
+    if (!menuBarObject) { CFRelease(application); return @{@"ok": @NO, @"error": @"menu-bar-unavailable"}; }
+    AXUIElementRef menuBar = (__bridge AXUIElementRef)menuBarObject;
+    NSArray *topItems = ElementChildren(menuBar);
+    NSMutableArray *menus = [NSMutableArray array];
+    NSUInteger count = MIN(topItems.count, 24);
+    for (NSUInteger index = 0; index < count; index++) {
+        AXUIElementRef topItem = (__bridge AXUIElementRef)topItems[index];
+        NSString *title = CleanString(CopyAttribute(topItem, kAXTitleAttribute), 80);
+        if (!title) continue;
+        id enabledObject = CopyAttribute(topItem, kAXEnabledAttribute);
+        NSArray *path = @[@(index)];
+        [menus addObject:@{
+            @"title": title,
+            @"path": path,
+            @"enabled": @(![enabledObject isKindOfClass:NSNumber.class] || [enabledObject boolValue]),
+            @"items": SerializeMenuChildren(topItem, path, 0)
+        }];
+    }
+    NSRunningApplication *running = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    NSDictionary *result = @{
+        @"ok": @YES,
+        @"app": @{
+            @"pid": @(pid),
+            @"name": running.localizedName ?: @"Unknown App",
+            @"bundleId": running.bundleIdentifier ?: [NSString stringWithFormat:@"pid.%d", pid]
+        },
+        @"menus": menus,
+        @"capturedAt": @([[NSDate date] timeIntervalSince1970] * 1000.0)
+    };
+    CFRelease(application);
+    return result;
+}
+
+static AXUIElementRef CopyElementAtPath(AXUIElementRef root, NSArray *path) {
+    AXUIElementRef current = (AXUIElementRef)CFRetain(root);
+    for (id component in path) {
+        if (![component isKindOfClass:NSNumber.class]) { CFRelease(current); return NULL; }
+        NSInteger index = [component integerValue];
+        NSArray *children = ElementChildren(current);
+        if (index < 0 || index >= (NSInteger)children.count) { CFRelease(current); return NULL; }
+        AXUIElementRef next = (__bridge AXUIElementRef)children[(NSUInteger)index];
+        CFRetain(next);
+        CFRelease(current);
+        current = next;
+    }
+    return current;
+}
+
+static BOOL ActivateMenuItem(uint32_t windowID, NSArray *path) {
+    if (![path isKindOfClass:NSArray.class] || !path.count || path.count > 8) return NO;
+    pid_t pid = 0;
+    CGRect bounds;
+    if (!WindowDetails(windowID, &pid, &bounds)) return NO;
+    AXUIElementRef application = AXUIElementCreateApplication(pid);
+    AXUIElementSetMessagingTimeout(application, 1.2);
+    id menuBarObject = CopyAttribute(application, kAXMenuBarAttribute);
+    if (!menuBarObject) { CFRelease(application); return NO; }
+    AXUIElementRef item = CopyElementAtPath((__bridge AXUIElementRef)menuBarObject, path);
+    if (!item) { CFRelease(application); return NO; }
+    id enabled = CopyAttribute(item, kAXEnabledAttribute);
+    BOOL ok = ![enabled isKindOfClass:NSNumber.class] || [enabled boolValue];
+    if (ok) ok = AXUIElementPerformAction(item, kAXPressAction) == kAXErrorSuccess;
+    if (!ok) {
+        NSRunningApplication *running = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+        [running activateWithOptions:0];
+        ok = AXUIElementPerformAction(item, kAXPressAction) == kAXErrorSuccess;
+    }
+    CFRelease(item);
+    CFRelease(application);
+    return ok;
+}
+
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         if (argc == 3 && strcmp(argv[1], "--observe") == 0) return ObserveWindow((uint32_t)strtoul(argv[2], NULL, 10));
@@ -467,6 +599,17 @@ int main(int argc, const char *argv[]) {
                     NSMutableDictionary *snapshot = [AccessibilitySnapshot([command[@"windowId"] unsignedIntValue]) mutableCopy];
                     snapshot[@"id"] = requestID;
                     Emit(snapshot);
+                    continue;
+                }
+                if ([type isEqualToString:@"menu-snapshot"]) {
+                    NSMutableDictionary *snapshot = [MenuSnapshot([command[@"windowId"] unsignedIntValue]) mutableCopy];
+                    snapshot[@"id"] = requestID;
+                    Emit(snapshot);
+                    continue;
+                }
+                if ([type isEqualToString:@"menu-activate"]) {
+                    BOOL ok = ActivateMenuItem([command[@"windowId"] unsignedIntValue], command[@"path"]);
+                    Emit(@{@"id": requestID, @"ok": @(ok), @"error": ok ? NSNull.null : @"menu-action-failed"});
                     continue;
                 }
                 pid_t pid = 0;

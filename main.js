@@ -3,6 +3,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { app, BrowserWindow, desktopCapturer, ipcMain, screen, shell, systemPreferences } = require('electron');
+const { ControlServer } = require('./control-server');
 const { HeadTracker } = require('./tracking');
 const { InputBridge } = require('./input-bridge');
 const { ProfileStore, diffSnapshots } = require('./profile-store');
@@ -13,6 +14,9 @@ const { ThemeAgent } = require('./theme-agent');
 let mainWindow;
 let chatRunner;
 let themeAgent;
+let controlServer;
+let controlSequence = 0;
+const controlPending = new Map();
 const PROFILE_DURATION_MS = Math.max(10000, Number(process.env.XR_PROFILE_DURATION_MS) || 5 * 60 * 1000);
 const inputBridge = new InputBridge();
 const profileStore = new ProfileStore(path.join(__dirname, 'integration-profiles'));
@@ -67,6 +71,53 @@ function inputCommand(value) {
 function sourceWindowId(sourceId) {
   const match = /^window:(\d+):\d+$/.exec(String(sourceId || ''));
   return match ? Number(match[1]) : null;
+}
+
+async function availableApplicationWindows(includeImages = true) {
+  try {
+    const sources = await desktopCapturer.getSources({
+      types: ['window'],
+      fetchWindowIcons: includeImages,
+      thumbnailSize: includeImages ? { width: 360, height: 220 } : { width: 0, height: 0 }
+    });
+    return sources
+      .filter((source) => source.name && !/^XR Shell$/i.test(source.name))
+      .map((source) => ({
+        id: source.id,
+        name: source.name,
+        ...(includeImages ? {
+          thumbnail: source.thumbnail.isEmpty() ? null : source.thumbnail.toDataURL(),
+          appIcon: source.appIcon && !source.appIcon.isEmpty() ? source.appIcon.toDataURL() : null
+        } : {})
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function requestRendererControl(method, params = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) return Promise.reject(new Error('XR Shell window is not ready'));
+  const id = ++controlSequence;
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      controlPending.delete(id);
+      reject(new Error(`XR Shell control timed out: ${method}`));
+    }, 10000);
+    controlPending.set(id, { resolve, reject, timeout });
+    mainWindow.webContents.send('control:request', { id, method, params });
+  });
+}
+
+async function handleControlRequest(method, params = {}) {
+  if (method === 'list_apps') {
+    const [apps, layout] = await Promise.all([
+      availableApplicationWindows(false),
+      requestRendererControl('get_layout').catch(() => ({ windows: [], activeSourceId: null }))
+    ]);
+    const captured = new Set((layout.windows || []).map((item) => item.sourceId));
+    return { apps: apps.map((item) => ({ ...item, captured: captured.has(item.id) })), ...layout };
+  }
+  return requestRendererControl(method, params);
 }
 
 async function snapshotForSource(sourceId) {
@@ -228,6 +279,18 @@ app.whenReady().then(() => {
   ipcMain.handle('input:status', () => inputBridge.request({ type: 'status', prompt: false }));
   ipcMain.handle('input:enable', () => inputBridge.request({ type: 'status', prompt: true }));
   ipcMain.handle('input:open-settings', () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'));
+  ipcMain.handle('menu:snapshot', async (_event, sourceId) => {
+    const windowId = sourceWindowId(sourceId);
+    return windowId === null ? { ok: false, error: 'invalid-window-source' } : inputBridge.request({ type: 'menu-snapshot', windowId });
+  });
+  ipcMain.handle('menu:activate', async (_event, sourceId, rawPath) => {
+    const windowId = sourceWindowId(sourceId);
+    const menuPath = Array.isArray(rawPath) ? rawPath.map(Number) : [];
+    if (windowId === null || !menuPath.length || menuPath.length > 8 || menuPath.some((value) => !Number.isInteger(value) || value < 0 || value > 500)) {
+      return { ok: false, error: 'invalid-menu-path' };
+    }
+    return inputBridge.request({ type: 'menu-activate', windowId, path: menuPath });
+  });
   ipcMain.handle('profile:toggle', async (_event, sourceId, enabled) => {
     if (!enabled) {
       stopProfiler(sourceId);
@@ -261,24 +324,14 @@ app.whenReady().then(() => {
   ipcMain.handle('capture:permission', () => process.platform === 'darwin'
     ? systemPreferences.getMediaAccessStatus('screen')
     : 'granted');
-  ipcMain.handle('window:list', async () => {
-    try {
-      const sources = await desktopCapturer.getSources({
-        types: ['window'],
-        fetchWindowIcons: true,
-        thumbnailSize: { width: 360, height: 220 }
-      });
-      return sources
-        .filter((source) => source.name && !/^XR Shell$/i.test(source.name))
-        .map((source) => ({
-          id: source.id,
-          name: source.name,
-          thumbnail: source.thumbnail.isEmpty() ? null : source.thumbnail.toDataURL(),
-          appIcon: source.appIcon && !source.appIcon.isEmpty() ? source.appIcon.toDataURL() : null
-        }));
-    } catch {
-      return [];
-    }
+  ipcMain.handle('window:list', () => availableApplicationWindows(true));
+  ipcMain.on('control:response', (_event, response) => {
+    const pending = controlPending.get(response?.id);
+    if (!pending) return;
+    controlPending.delete(response.id);
+    clearTimeout(pending.timeout);
+    if (response.ok) pending.resolve(response.result);
+    else pending.reject(new Error(response.error || 'XR Shell control failed'));
   });
   ipcMain.handle('display:move', (_event, requestedId) => {
     const target = screen.getAllDisplays().find((display) => display.id === Number(requestedId));
@@ -302,6 +355,8 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+  controlServer = new ControlServer({ onRequest: handleControlRequest });
+  controlServer.start();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
@@ -312,4 +367,13 @@ app.on('window-all-closed', () => {
   tracker.stop(false);
   inputBridge.stop();
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+  controlServer?.stop();
+  for (const pending of controlPending.values()) {
+    clearTimeout(pending.timeout);
+    pending.reject(new Error('XR Shell stopped'));
+  }
+  controlPending.clear();
 });
