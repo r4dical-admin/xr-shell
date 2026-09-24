@@ -2,7 +2,10 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { aggregateEvents, diffSnapshots, summarizeSnapshot } = require('../profile-store');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { ProfileStore, aggregateEvents, diffSnapshots, summarizeSnapshot } = require('../profile-store');
 
 const base = {
   ok: true,
@@ -49,4 +52,20 @@ test('event aggregation preserves useful interaction frequencies without labels 
   assert.equal(patterns.interactions['AXValueChanged:AXTextField'], 2);
   assert.equal(JSON.stringify(patterns).includes('private'), false);
   assert.equal(JSON.stringify(patterns).includes('secret'), false);
+});
+
+test('profile library can inspect and clear recordings without deleting the theme', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'xr-shell-profiles-'));
+  const store = new ProfileStore(directory);
+  store.save(base, [{ type: 'AXPressed', role: 'AXButton', at: 1000 }]);
+  const [summary] = store.list();
+  assert.equal(summary.bundleId, 'com.example.Editor');
+  assert.equal(summary.hasRecording, true);
+  assert.equal(store.details(summary.bundleId, 'recording').eventPatterns.total, 1);
+  const theme = store.details(summary.bundleId).xrTheme;
+  assert.equal(store.clearRecording(summary.bundleId), true);
+  assert.equal(store.details(summary.bundleId, 'recording').eventPatterns.total, 0);
+  assert.deepEqual(store.details(summary.bundleId).xrTheme, theme);
+  assert.equal(store.delete(summary.bundleId), true);
+  assert.deepEqual(store.list(), []);
 });

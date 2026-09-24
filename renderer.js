@@ -63,6 +63,13 @@ const chatInput = document.getElementById('chat-input');
 const chatSend = document.getElementById('chat-send');
 const chatResponse = document.getElementById('chat-response');
 const sessionList = document.getElementById('session-list');
+const intensityDialog = document.getElementById('theme-intensity-dialog');
+const intensityInput = document.getElementById('theme-intensity');
+const intensityLabel = document.getElementById('theme-intensity-label');
+const intensityTitle = document.getElementById('intensity-title');
+const profileLibrary = document.getElementById('profile-library');
+const profileLibraryList = document.getElementById('profile-library-list');
+const profileLibraryDetail = document.getElementById('profile-library-detail');
 const liveWindowSummary = document.getElementById('live-window-summary');
 const liveWindowCount = document.getElementById('live-window-count');
 
@@ -86,6 +93,9 @@ let lastDragSent = 0;
 let permissionPoll = null;
 let sessions = [];
 let activeSessionId = null;
+let intensityPanel = null;
+let intensityBeforePreview = 60;
+let intensityEnabledBeforePreview = true;
 try { sessions = JSON.parse(localStorage.getItem('xr-shell:sessions') || '[]'); } catch { sessions = []; }
 
 const keyCodes = {
@@ -248,21 +258,168 @@ function applyProfileTheme(panel, theme) {
   panel.style.setProperty('--profile-line', theme.palette.line);
   panel.style.setProperty('--profile-ink', theme.palette.ink);
   panel.style.setProperty('--profile-video-filter', theme.videoFilter);
-  setThemeEnabled(panel, true);
+  const preference = readThemePreference(theme);
+  setThemeIntensity(panel, preference.intensity, false);
+  setThemeEnabled(panel, preference.enabled, false);
 }
 
-function setThemeEnabled(panel, enabled) {
+function themePreferenceKey(theme) {
+  return `xr-shell:theme:${String(theme?.name || 'unknown')}`;
+}
+
+function readThemePreference(theme) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(themePreferenceKey(theme)) || '{}');
+    return { intensity: clamp(Number(saved.intensity) || 60, 15, 100), enabled: saved.enabled !== false };
+  } catch { return { intensity: 60, enabled: true }; }
+}
+
+function saveThemePreference(panel) {
+  if (!panel.xrTheme) return;
+  localStorage.setItem(themePreferenceKey(panel.xrTheme), JSON.stringify({
+    intensity: panel.themeIntensity || 60,
+    enabled: panel.classList.contains('profile-themed')
+  }));
+}
+
+function intensityDescription(value) {
+  if (value <= 35) return 'Light';
+  if (value <= 70) return 'Balanced';
+  if (value <= 88) return 'Bold';
+  return 'Extreme';
+}
+
+function setThemeIntensity(panel, value, persist = true) {
+  const intensity = clamp(Number(value) || 60, 15, 100);
+  const strength = intensity / 100;
+  panel.themeIntensity = intensity;
+  panel.dataset.themeLevel = intensity <= 35 ? 'light' : intensity >= 89 ? 'extreme' : 'balanced';
+  panel.style.setProperty('--theme-strength', strength.toFixed(2));
+  panel.style.setProperty('--theme-mix', `${Math.round(7 + strength * 25)}%`);
+  panel.style.setProperty('--theme-inner-mix', `${Math.round(5 + strength * 14)}%`);
+  if (persist) saveThemePreference(panel);
+  const button = panel.querySelector('[data-theme]');
+  if (panel.xrTheme) button.title = `${panel.xrTheme.name} · ${intensityDescription(intensity)} ${Math.round(intensity)}% · click to toggle`;
+}
+
+function setThemeEnabled(panel, enabled, persist = true) {
   const available = Boolean(panel.xrTheme);
   const active = available && enabled;
   panel.classList.toggle('profile-themed', active);
   const button = panel.querySelector('[data-theme]');
   button.classList.toggle('active', active);
   button.textContent = available ? `THEME ${active ? 'ON' : 'OFF'}` : 'THEME —';
-  button.title = available ? `${panel.xrTheme.name} · click to compare ${active ? 'original' : 'themed'} view` : 'No generated theme yet';
+  button.title = available ? `${panel.xrTheme.name} · ${intensityDescription(panel.themeIntensity || 60)} ${Math.round(panel.themeIntensity || 60)}% · click to compare ${active ? 'original' : 'themed'} view` : 'No generated theme yet';
   panel.querySelector('.capture-title small').textContent = active
     ? `${String(panel.xrTheme.name || 'XR PROFILE').toUpperCase()} · THEME ON`
     : 'HOLOGRAPHIC WINDOW LINK · THEME OFF';
   trackingState.textContent = available ? `${panel.xrTheme.name} · theme ${active ? 'enabled' : 'disabled'}` : trackingState.textContent;
+  if (persist) saveThemePreference(panel);
+}
+
+function updateIntensityPreview(value) {
+  if (!intensityPanel) return;
+  setThemeEnabled(intensityPanel, true, false);
+  setThemeIntensity(intensityPanel, value, false);
+  intensityLabel.value = `${intensityDescription(Number(value))} · ${Math.round(Number(value))}%`;
+}
+
+function showThemeIntensity(panel, appName) {
+  if (!panel?.xrTheme) return;
+  if (profileLibrary.open) profileLibrary.close();
+  if (intensityDialog.open) intensityDialog.close();
+  intensityPanel = panel;
+  intensityBeforePreview = panel.themeIntensity || 60;
+  intensityEnabledBeforePreview = panel.classList.contains('profile-themed');
+  intensityTitle.textContent = `How much should ${appName || 'this app'} be reskinned?`;
+  intensityInput.value = String(intensityBeforePreview);
+  updateIntensityPreview(intensityBeforePreview);
+  intensityDialog.showModal();
+}
+
+function closeIntensity(restore) {
+  if (restore && intensityPanel) {
+    setThemeIntensity(intensityPanel, intensityBeforePreview, false);
+    setThemeEnabled(intensityPanel, intensityEnabledBeforePreview, false);
+  }
+  intensityDialog.close();
+  intensityPanel = null;
+}
+
+async function showProfileDetails(bundleId, kind) {
+  const detail = await window.horizon.profileDetails(bundleId, kind);
+  profileLibraryDetail.textContent = detail ? JSON.stringify(detail, null, 2) : 'This item no longer exists.';
+}
+
+function removeDeletedProfileTheme(appName) {
+  for (const captured of capturedWindows.values()) {
+    const title = captured.panel.querySelector('.capture-title span')?.textContent || '';
+    if (!title.toLowerCase().includes(String(appName).toLowerCase())) continue;
+    setThemeEnabled(captured.panel, false, false);
+    captured.panel.xrTheme = null;
+    captured.panel.removeAttribute('data-motif');
+    captured.panel.querySelector('[data-theme]').textContent = 'THEME —';
+    captured.panel.querySelector('[data-theme]').title = 'No generated theme yet';
+  }
+}
+
+async function renderProfileLibrary() {
+  const profiles = await window.horizon.listProfiles();
+  profileLibraryList.replaceChildren();
+  if (!profiles.length) {
+    const empty = document.createElement('p');
+    empty.className = 'profile-library-empty';
+    empty.textContent = 'No learned app profiles yet.';
+    profileLibraryList.append(empty);
+    return;
+  }
+  for (const profile of profiles) {
+    const card = document.createElement('article');
+    card.className = 'profile-entry';
+    const header = document.createElement('header');
+    const name = document.createElement('strong');
+    name.textContent = profile.name;
+    const count = document.createElement('small');
+    count.textContent = `${profile.eventCount} events`;
+    header.append(name, count);
+    const summary = document.createElement('p');
+    summary.textContent = `${profile.bundleId} · ${profile.roleCount} AX roles · ${profile.nodeCount} layout nodes · ${profile.themeName || 'no theme'}`;
+    const actions = document.createElement('nav');
+    const viewProfile = document.createElement('button');
+    viewProfile.type = 'button';
+    viewProfile.textContent = 'View profile';
+    viewProfile.addEventListener('click', () => showProfileDetails(profile.bundleId, 'profile'));
+    const viewRecording = document.createElement('button');
+    viewRecording.type = 'button';
+    viewRecording.textContent = 'View recording';
+    viewRecording.disabled = !profile.hasRecording;
+    viewRecording.addEventListener('click', () => showProfileDetails(profile.bundleId, 'recording'));
+    const clearRecording = document.createElement('button');
+    clearRecording.type = 'button';
+    clearRecording.className = 'danger';
+    clearRecording.textContent = 'Clear recording';
+    clearRecording.disabled = !profile.hasRecording;
+    clearRecording.addEventListener('click', async () => {
+      if (!confirm(`Clear learned AX layout and event data for ${profile.name}? The generated profile and theme will remain.`)) return;
+      await window.horizon.deleteRecording(profile.bundleId);
+      profileLibraryDetail.textContent = `${profile.name} recording data cleared. Its profile and theme were preserved.`;
+      await renderProfileLibrary();
+    });
+    const deleteProfile = document.createElement('button');
+    deleteProfile.type = 'button';
+    deleteProfile.className = 'danger';
+    deleteProfile.textContent = 'Delete profile';
+    deleteProfile.addEventListener('click', async () => {
+      if (!confirm(`Delete the complete ${profile.name} integration profile and generated theme?`)) return;
+      await window.horizon.deleteProfile(profile.bundleId);
+      removeDeletedProfileTheme(profile.name);
+      profileLibraryDetail.textContent = `${profile.name} profile deleted.`;
+      await renderProfileLibrary();
+    });
+    actions.append(viewProfile, viewRecording, clearRecording, deleteProfile);
+    card.append(header, summary, actions);
+    profileLibraryList.append(card);
+  }
 }
 
 function bringCaptureToFront(sourceId, panel) {
@@ -945,6 +1102,7 @@ window.horizon.onProfileStatus(({ sourceId, stage, appName, endsAt, eventCount, 
     applyProfileTheme(captured.panel, theme);
     captured.panel.querySelector('footer b').textContent = `${eventCount || 0} AX EVENTS · ${fallback ? 'ADAPTIVE' : 'CODEX'} THEME`;
     trackingState.textContent = `${appName} XR theme installed${fallback ? ' using the local fallback' : ' by Codex'}`;
+    requestAnimationFrame(() => showThemeIntensity(captured.panel, appName));
   } else {
     trackingState.textContent = `Theme learning failed · ${error || 'unknown error'}`;
   }
@@ -971,6 +1129,33 @@ chatInput.addEventListener('keydown', (event) => {
 });
 document.getElementById('new-session').addEventListener('click', () => {
   createChatSession();
+});
+document.getElementById('open-profiles').addEventListener('click', async () => {
+  if (intensityDialog.open) closeIntensity(false);
+  profileLibraryDetail.textContent = 'Select View profile or View recording to inspect its local JSON.';
+  await renderProfileLibrary();
+  profileLibrary.showModal();
+});
+profileLibrary.querySelector('[data-library-close]').addEventListener('click', () => profileLibrary.close());
+intensityInput.addEventListener('input', () => updateIntensityPreview(intensityInput.value));
+intensityDialog.querySelector('[data-intensity-close]').addEventListener('click', () => closeIntensity(true));
+intensityDialog.querySelector('[data-intensity-off]').addEventListener('click', () => {
+  if (intensityPanel) {
+    setThemeIntensity(intensityPanel, intensityInput.value, false);
+    setThemeEnabled(intensityPanel, false, true);
+  }
+  closeIntensity(false);
+});
+intensityDialog.querySelector('[data-intensity-apply]').addEventListener('click', () => {
+  if (intensityPanel) {
+    setThemeIntensity(intensityPanel, intensityInput.value, false);
+    setThemeEnabled(intensityPanel, true, true);
+  }
+  closeIntensity(false);
+});
+intensityDialog.addEventListener('cancel', (event) => {
+  event.preventDefault();
+  closeIntensity(true);
 });
 document.querySelectorAll('.quick-actions [data-prompt]').forEach((button) => button.addEventListener('click', () => {
   chatInput.value = button.dataset.prompt;

@@ -156,6 +156,68 @@ class ProfileStore {
     fs.writeFileSync(outputPath, `${JSON.stringify(profile, null, 2)}\n`);
     return { profile, outputPath };
   }
+
+  entries() {
+    let filenames = [];
+    try { filenames = fs.readdirSync(this.directory).filter((name) => name.endsWith('.json')); } catch { return []; }
+    const entries = [];
+    for (const filename of filenames) {
+      try {
+        const outputPath = path.join(this.directory, filename);
+        const profile = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+        if (profile.app?.bundleId) entries.push({ filename, outputPath, profile });
+      } catch { /* skip malformed or unreadable profiles */ }
+    }
+    return entries;
+  }
+
+  list() {
+    return this.entries().map(({ profile }) => ({
+      bundleId: profile.app.bundleId,
+      name: profile.app.name,
+      updatedAt: profile.updatedAt,
+      themeName: profile.xrTheme?.name || null,
+      themeVersion: profile.xrTheme?.version || null,
+      roleCount: Object.keys(profile.capabilities?.roles || {}).length,
+      nodeCount: (profile.latestLayout || []).length,
+      eventCount: Number(profile.eventPatterns?.total) || 0,
+      hasRecording: Boolean((profile.latestLayout || []).length || Number(profile.eventPatterns?.total))
+    })).sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)));
+  }
+
+  details(bundleId, kind = 'profile') {
+    const entry = this.entries().find(({ profile }) => profile.app.bundleId === bundleId);
+    if (!entry) return null;
+    if (kind === 'recording') {
+      return {
+        app: entry.profile.app,
+        updatedAt: entry.profile.updatedAt,
+        eventPatterns: entry.profile.eventPatterns || {},
+        roleSamples: entry.profile.roleSamples || {},
+        latestLayout: entry.profile.latestLayout || []
+      };
+    }
+    return entry.profile;
+  }
+
+  delete(bundleId) {
+    const entry = this.entries().find(({ profile }) => profile.app.bundleId === bundleId);
+    if (!entry) return false;
+    fs.unlinkSync(entry.outputPath);
+    return true;
+  }
+
+  clearRecording(bundleId) {
+    const entry = this.entries().find(({ profile }) => profile.app.bundleId === bundleId);
+    if (!entry) return false;
+    entry.profile.eventPatterns = aggregateEvents();
+    entry.profile.roleSamples = {};
+    entry.profile.latestLayout = [];
+    if (entry.profile.capabilities) entry.profile.capabilities.observedEvents = [];
+    entry.profile.recordingClearedAt = new Date().toISOString();
+    fs.writeFileSync(entry.outputPath, `${JSON.stringify(entry.profile, null, 2)}\n`);
+    return true;
+  }
 }
 
 module.exports = { ProfileStore, aggregateEvents, diffSnapshots, summarizeSnapshot };

@@ -26,6 +26,8 @@ The central command deck starts real Codex CLI sessions in a read-only sandbox. 
 
 Captured windows expose explicit **THEME ON/OFF** comparison and **FRONT** controls. The window selector refreshes from active macOS windows every two seconds and can be refreshed manually. Width and height controls independently size the panoramic canvas. Codex sessions can be created, resumed, and removed from the session rail; removing a running session stops its local process.
 
+When profile learning finishes, XR Shell opens an intensity preview from **Light** to **Extreme** and remembers the choice for that theme. The top-bar **Profiles** library can inspect the complete local profile or its recording-derived AX summary, clear recording data while preserving the theme, or delete the entire profile.
+
 For live tracking, connect the One Pro directly over USB-C, enable Ethernet in its developer menu, use flat Follow display mode, click **Connect XREAL**, hold still while calibration completes, and press **Recenter** while facing forward.
 
 ## Implemented

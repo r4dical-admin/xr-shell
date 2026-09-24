@@ -84,6 +84,12 @@ function stopProfiler(sourceId) {
   profilers.delete(sourceId);
 }
 
+function stopProfilersForBundleId(bundleId) {
+  for (const [sourceId, profiler] of profilers) {
+    if (profiler.previous?.app?.bundleId === bundleId) stopProfiler(sourceId);
+  }
+}
+
 function sendProfileStatus(sourceId, value) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('profile:status', { sourceId, ...value });
 }
@@ -230,6 +236,18 @@ app.whenReady().then(() => {
     return startProfiler(sourceId);
   });
   ipcMain.handle('profile:theme-for-app', (_event, appName) => profileStore.themeForAppName(String(appName || '').slice(0, 300)));
+  ipcMain.handle('profile:list', () => profileStore.list());
+  ipcMain.handle('profile:details', (_event, bundleId, kind) => profileStore.details(String(bundleId || '').slice(0, 300), kind === 'recording' ? 'recording' : 'profile'));
+  ipcMain.handle('profile:delete', (_event, bundleId) => {
+    const safeBundleId = String(bundleId || '').slice(0, 300);
+    stopProfilersForBundleId(safeBundleId);
+    return { ok: profileStore.delete(safeBundleId) };
+  });
+  ipcMain.handle('profile:recording-delete', (_event, bundleId) => {
+    const safeBundleId = String(bundleId || '').slice(0, 300);
+    stopProfilersForBundleId(safeBundleId);
+    return { ok: profileStore.clearRecording(safeBundleId) };
+  });
   ipcMain.handle('chat:send', (_event, request) => chatRunner.send(request || {}));
   ipcMain.handle('chat:delete', (_event, clientId) => ({ ok: true, stopped: chatRunner.stop(String(clientId || '')) }));
   ipcMain.on('input:event', (_event, value) => {

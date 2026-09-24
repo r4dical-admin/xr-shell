@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('horizon', {
   openInputSettings: () => ipcRenderer.invoke('input:open-settings'),
   toggleProfile: (sourceId, enabled) => ipcRenderer.invoke('profile:toggle', sourceId, enabled),
   themeForApp: (appName) => ipcRenderer.invoke('profile:theme-for-app', appName),
+  listProfiles: () => ipcRenderer.invoke('profile:list'),
+  profileDetails: (bundleId, kind) => ipcRenderer.invoke('profile:details', bundleId, kind),
+  deleteProfile: (bundleId) => ipcRenderer.invoke('profile:delete', bundleId),
+  deleteRecording: (bundleId) => ipcRenderer.invoke('profile:recording-delete', bundleId),
   sendChat: (request) => ipcRenderer.invoke('chat:send', request),
   deleteChat: (clientId) => ipcRenderer.invoke('chat:delete', clientId),
   onChatEvent: (callback) => {
