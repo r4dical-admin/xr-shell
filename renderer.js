@@ -173,7 +173,7 @@ async function captureWindow(source) {
   const panel = document.createElement('article');
   panel.className = 'captured-window glass';
   panel.innerHTML = `
-    <header title="Drag to move this window in the workspace"><div class="capture-title">${source.appIcon ? `<img src="${source.appIcon}" alt="" />` : '<i></i>'}<div><small>HOLOGRAPHIC WINDOW LINK · GRAB TO MOVE</small><span>${escapeHtml(source.name)}</span></div></div><div class="capture-actions"><em>● LIVE</em><button type="button" data-profile aria-label="Learn accessibility profile">AX</button><button type="button" data-theme aria-label="Toggle generated theme" title="No generated theme yet">THEME —</button><button type="button" data-front aria-label="Bring window to front">FRONT</button><button type="button" data-smaller aria-label="Make window smaller">−</button><button type="button" data-larger aria-label="Make window larger">+</button><button type="button" data-fx>FX</button><button type="button" data-remove aria-label="Remove window">×</button></div></header>
+    <header title="Drag to move this window in the workspace"><div class="capture-title">${source.appIcon ? `<img src="${source.appIcon}" alt="" />` : '<i></i>'}<div><small>HOLOGRAPHIC WINDOW LINK · GRAB TO MOVE</small><span>${escapeHtml(source.name)}</span></div></div><div class="capture-actions"><em>● LIVE</em><button type="button" data-profile aria-label="Learn accessibility profile">AX</button><button type="button" data-theme aria-label="Toggle generated theme" title="No generated theme yet">THEME —</button><button type="button" data-front aria-label="Bring window to front">FRONT</button><button type="button" data-smaller aria-label="Make window smaller">−</button><button type="button" data-larger aria-label="Make window larger">+</button><button type="button" data-fx>FX</button><button type="button" data-remove class="release-app" aria-label="Release app from XR workspace" title="Stop mirroring and release this app from XR Shell">RELEASE</button></div></header>
     <div class="capture-viewport">${source.thumbnail ? `<img class="capture-placeholder" src="${source.thumbnail}" alt="Preview of ${escapeHtml(source.name)}" />` : '<div class="capture-empty"><strong>SCREEN RECORDING REQUIRED</strong>Allow access in Privacy & Security, then add this window again.</div>'}<div class="semantic-layer" aria-hidden="true"></div><div class="xr-cursor" aria-hidden="true"><i></i></div><div class="capture-overlay"><i></i><i></i><i></i><i></i><span>OPTICAL FEED · SECURE</span></div></div>
     <footer><span>30 FPS · GLASS-02 · MIRRORED SURFACE</span><b>DRAG CORNER TO RESIZE</b></footer><div class="resize-grip" title="Drag to resize" aria-hidden="true"></div>`;
   appStage.append(panel);
@@ -240,7 +240,10 @@ function removeCapturedWindow(id) {
   capturedWindows.delete(id);
   if (activeCaptureId === id) activeCaptureId = null;
   layoutCapturedWindows();
+  const remaining = [...capturedWindows.entries()].at(-1);
+  if (remaining) bringCaptureToFront(remaining[0], remaining[1].panel);
   centerWorkspace();
+  trackingState.textContent = 'App released from XR workspace · original macOS app remains open';
 }
 
 function semanticLabel(element) {
