@@ -46,9 +46,22 @@ Configure any MCP client to launch:
 }
 ```
 
-The server exposes `xr_shell_list_apps`, `xr_shell_get_layout`, `xr_shell_pull_app`, `xr_shell_focus_app`, `xr_shell_transform_app`, and `xr_shell_release_app`. Apps can be addressed by the source ID returned from the list tool or by a case-insensitive window-name query. Transform coordinates are pixel offsets from the app's automatic layout slot; width and height are pixels constrained to the visible XR workspace.
+The core app tools are `xr_shell_list_apps`, `xr_shell_get_layout`, `xr_shell_pull_app`, `xr_shell_focus_app`, `xr_shell_transform_app`, and `xr_shell_release_app`; the A2UI tools are described below. Apps can be addressed by the source ID returned from the list tool or by a case-insensitive window-name query. Transform coordinates are pixel offsets from the app's automatic layout slot; width and height are pixels constrained to the visible XR workspace.
 
 XR Shell's built-in Codex chat attaches this MCP server automatically, so requests such as “bring Terminal into the workspace, place it 200 pixels left, and make it 800 × 600” can be handled through the same explicit controls. Other local agents can use the configuration above.
+
+### A2UI surfaces
+
+XR Shell implements a safe subset of the production A2UI v0.9.1 protocol. Agent-generated surfaces use the Basic Catalog component model and are rendered as persistent spatial widgets. XR Shell always adds its own drag handle, **Save**, and close controls, so an agent cannot create a widget that traps the user. Saved widgets appear in the top-bar **Widgets** library, where they can be turned on, turned off, or permanently deleted. Restoring a saved app layout reruns its app-and-placement recipe locally.
+
+The initial use cases are:
+
+- `xr_shell_open_layout`: opens one to three named macOS app windows, applies their requested XR positions and sizes, and creates a draggable layout controller.
+- `xr_shell_add_note`: creates a draggable floating note.
+- `xr_shell_a2ui_apply`: applies ordered `createSurface`, `updateComponents`, `updateDataModel`, and `deleteSurface` messages.
+- `xr_shell_a2ui_capabilities`, `xr_shell_a2ui_delete`, and `xr_shell_a2ui_events`: inspect support, remove surfaces, and read explicit user events.
+
+Rendered components are self-contained after creation. Dragging, closing, local form state, and allowlisted `mcp.call` actions run inside XR Shell without another agent turn. Only an explicit agent-directed event needs to be read by an agent. Arbitrary HTML, scripts, executable renderer functions, and unregistered components are rejected.
 
 When profile learning finishes, XR Shell opens an intensity preview from **Light** to **Extreme** and remembers the choice for that theme. The top-bar **Profiles** library can inspect the complete local profile or its recording-derived AX summary, clear recording data while preserving the theme, or delete the entire profile.
 
@@ -63,6 +76,7 @@ For live tracking, connect the One Pro directly over USB-C, enable Ethernet in i
 - Direct spatial repositioning and constrained resizing for every captured surface.
 - A shared, draggable Accessibility-backed macOS application menu for the frontmost captured app.
 - A standalone local MCP server for agent-driven app discovery, capture, focus, placement, sizing and release.
+- Persistent A2UI v0.9.1 spatial surfaces with local MCP actions, including app layouts and floating notes.
 - Per-application Accessibility inventory and locally generated integration profiles.
 - Live role-aware holographic overlays and learned UI event capabilities.
 - Explicit macOS Accessibility permission boundary; input is disabled until the user grants access.

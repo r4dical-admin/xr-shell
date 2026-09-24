@@ -59,6 +59,7 @@ const connectButton = document.getElementById('connect');
 const enableInputButton = document.getElementById('enable-input');
 const windowPicker = document.getElementById('window-picker');
 const appStage = document.getElementById('app-stage');
+const a2uiStage = document.getElementById('a2ui-stage');
 const chatInput = document.getElementById('chat-input');
 const chatSend = document.getElementById('chat-send');
 const chatResponse = document.getElementById('chat-response');
@@ -76,6 +77,8 @@ const spatialMenuBar = document.getElementById('spatial-menubar');
 const menuAppName = document.getElementById('menu-app-name');
 const menuRoot = document.getElementById('menu-root');
 const menuState = document.getElementById('menu-state');
+const widgetLibrary = document.getElementById('widget-library');
+const widgetLibraryList = document.getElementById('widget-library-list');
 
 const headView = new HeadView();
 const pitchStabilizer = new PitchStabilizer();
@@ -101,7 +104,17 @@ let intensityPanel = null;
 let intensityBeforePreview = 60;
 let intensityModeBeforePreview = 'theme';
 let menuRefreshSequence = 0;
+const a2uiStore = window.XR_A2UI.createStore();
+const a2uiNodes = new Map();
+const a2uiEvents = [];
+let a2uiEventSequence = 0;
+let a2uiFrontOrder = 0;
+let savedA2UIWidgets = [];
 try { sessions = JSON.parse(localStorage.getItem('xr-shell:sessions') || '[]'); } catch { sessions = []; }
+try {
+  const saved = JSON.parse(localStorage.getItem('xr-shell:a2ui-widgets') || '[]');
+  savedA2UIWidgets = Array.isArray(saved) ? saved.slice(0, 50) : [];
+} catch { savedA2UIWidgets = []; }
 
 const keyCodes = {
   Enter: 36, Tab: 48, ' ': 49, Backspace: 51, Escape: 53, Delete: 117,
@@ -594,6 +607,383 @@ function bindSpatialMenuDrag() {
   addEventListener('blur', finish);
 }
 
+function recordA2UIEvent(surface, componentId, name, context = {}, result) {
+  const item = {
+    sequence: ++a2uiEventSequence,
+    version: window.XR_A2UI.VERSION,
+    action: {
+      name,
+      surfaceId: surface.surfaceId,
+      sourceComponentId: componentId,
+      timestamp: new Date().toISOString(),
+      context
+    }
+  };
+  if (result !== undefined) item.result = result;
+  a2uiEvents.push(item);
+  if (a2uiEvents.length > 100) a2uiEvents.shift();
+  return item;
+}
+
+function persistSavedWidgets() {
+  localStorage.setItem('xr-shell:a2ui-widgets', JSON.stringify(savedA2UIWidgets.slice(0, 50)));
+}
+
+function a2uiSurfaceTitle(surface) {
+  const fallback = [...surface.components.values()].find((component) => component.component === 'Text');
+  return String(surface.placement.title || resolveA2UIValue(fallback?.text, surface) || surface.surfaceId).slice(0, 80);
+}
+
+function serializeA2UISurface(surface) {
+  return {
+    surfaceId: surface.surfaceId,
+    title: a2uiSurfaceTitle(surface),
+    catalogId: surface.catalogId,
+    theme: surface.theme,
+    sendDataModel: surface.sendDataModel,
+    components: [...surface.components.values()],
+    data: surface.data,
+    placement: surface.placement,
+    resumeAction: surface.resumeAction || null,
+    savedAt: Date.now()
+  };
+}
+
+function saveA2UISurface(surface, quiet = false) {
+  const snapshot = serializeA2UISurface(surface);
+  const index = savedA2UIWidgets.findIndex((item) => item.surfaceId === surface.surfaceId);
+  if (index >= 0) savedA2UIWidgets[index] = snapshot;
+  else savedA2UIWidgets.unshift(snapshot);
+  persistSavedWidgets();
+  const button = a2uiNodes.get(surface.surfaceId)?.node.querySelector('[data-a2ui-save]');
+  if (button) {
+    button.textContent = 'SAVED';
+    button.classList.add('saved');
+  }
+  if (!quiet) trackingState.textContent = `${snapshot.title} saved to the widget library`;
+  if (widgetLibrary.open) renderWidgetLibrary();
+  return snapshot;
+}
+
+async function restoreSavedWidget(saved) {
+  if (a2uiStore.surfaces.has(saved.surfaceId)) {
+    const node = a2uiNodes.get(saved.surfaceId)?.node;
+    if (node) node.style.zIndex = String(700 + ++a2uiFrontOrder);
+    return;
+  }
+  if (saved.resumeAction?.method === 'open_layout') {
+    await handleAgentControl('open_layout', { ...saved.resumeAction.params, surfaceId: saved.surfaceId });
+  } else {
+    const messages = [
+      { version: window.XR_A2UI.VERSION, createSurface: { surfaceId: saved.surfaceId, catalogId: saved.catalogId, theme: saved.theme, sendDataModel: saved.sendDataModel } },
+      { version: window.XR_A2UI.VERSION, updateComponents: { surfaceId: saved.surfaceId, components: saved.components } },
+      { version: window.XR_A2UI.VERSION, updateDataModel: { surfaceId: saved.surfaceId, value: saved.data || {} } }
+    ];
+    applyA2UI(messages, saved.placement || {});
+  }
+  const surface = a2uiStore.surfaces.get(saved.surfaceId);
+  if (surface) {
+    surface.resumeAction = saved.resumeAction || null;
+    surface.placement = { ...surface.placement, ...(saved.placement || {}) };
+    renderA2UISurface(saved.surfaceId);
+    saveA2UISurface(surface, true);
+  }
+}
+
+function renderWidgetLibrary() {
+  widgetLibraryList.replaceChildren();
+  if (!savedA2UIWidgets.length) {
+    const empty = document.createElement('p');
+    empty.className = 'profile-library-empty';
+    empty.textContent = 'No saved widgets yet. Use SAVE on any generated surface.';
+    widgetLibraryList.append(empty);
+    return;
+  }
+  for (const saved of savedA2UIWidgets) {
+    const active = a2uiStore.surfaces.has(saved.surfaceId);
+    const row = document.createElement('article');
+    row.className = 'widget-library-row';
+    const copy = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = saved.title || saved.surfaceId;
+    const detail = document.createElement('small');
+    detail.textContent = `${saved.components?.length || 0} components · ${new Date(saved.savedAt).toLocaleString()}`;
+    copy.append(title, detail);
+    const actions = document.createElement('div');
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.textContent = active ? 'Turn off' : 'Turn on';
+    toggle.className = active ? 'active' : '';
+    toggle.addEventListener('click', async () => {
+      if (active) removeA2UISurface(saved.surfaceId, false);
+      else await restoreSavedWidget(saved);
+      renderWidgetLibrary();
+    });
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'danger';
+    remove.textContent = 'Delete';
+    remove.addEventListener('click', () => {
+      if (!confirm(`Delete saved widget “${saved.title || saved.surfaceId}”?`)) return;
+      removeA2UISurface(saved.surfaceId, false);
+      savedA2UIWidgets = savedA2UIWidgets.filter((item) => item.surfaceId !== saved.surfaceId);
+      persistSavedWidgets();
+      renderWidgetLibrary();
+    });
+    actions.append(toggle, remove);
+    row.append(copy, actions);
+    widgetLibraryList.append(row);
+  }
+}
+
+function resolveA2UIValue(value, surface) {
+  if (Array.isArray(value)) return value.map((item) => resolveA2UIValue(item, surface));
+  if (value && typeof value === 'object') {
+    if (typeof value.path === 'string' && Object.keys(value).length === 1) return window.XR_A2UI.resolveValue(value, surface.data);
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolveA2UIValue(item, surface)]));
+  }
+  return value;
+}
+
+const a2uiActionMethods = {
+  xr_shell_pull_app: 'pull_app',
+  xr_shell_focus_app: 'focus_app',
+  xr_shell_transform_app: 'transform_app',
+  xr_shell_release_app: 'release_app',
+  xr_shell_open_layout: 'open_layout',
+  xr_shell_add_note: 'add_note',
+  xr_shell_a2ui_delete: 'a2ui_delete'
+};
+
+async function dispatchA2UIAction(surface, component) {
+  const event = component.action?.event;
+  if (!event?.name) return;
+  const context = resolveA2UIValue(event.context || {}, surface);
+  if (event.name !== 'mcp.call') {
+    recordA2UIEvent(surface, component.id, event.name, context);
+    return;
+  }
+  const method = a2uiActionMethods[context.tool];
+  if (!method) {
+    recordA2UIEvent(surface, component.id, event.name, context, { ok: false, error: 'tool-not-allowed' });
+    return;
+  }
+  try {
+    const result = await handleAgentControl(method, context.arguments || {});
+    recordA2UIEvent(surface, component.id, event.name, context, { ok: true, value: result });
+  } catch (error) {
+    recordA2UIEvent(surface, component.id, event.name, context, { ok: false, error: error.message });
+  }
+}
+
+function renderA2UIComponent(surface, componentId, ancestry = new Set()) {
+  if (ancestry.has(componentId)) {
+    const error = document.createElement('p');
+    error.className = 'a2ui-error';
+    error.textContent = 'Circular component reference';
+    return error;
+  }
+  const component = surface.components.get(componentId);
+  if (!component) {
+    const placeholder = document.createElement('span');
+    placeholder.className = 'a2ui-placeholder';
+    placeholder.textContent = `Waiting for ${componentId}`;
+    return placeholder;
+  }
+  const nextAncestry = new Set(ancestry).add(componentId);
+  const renderChild = (id) => renderA2UIComponent(surface, id, nextAncestry);
+  let node;
+  if (component.component === 'Text') {
+    node = document.createElement(component.variant === 'h1' || component.variant === 'h2' ? 'h3' : 'p');
+    node.textContent = String(resolveA2UIValue(component.text, surface) ?? '').slice(0, 5000);
+  } else if (component.component === 'Button') {
+    node = document.createElement('button');
+    node.type = 'button';
+    if (component.child) node.append(renderChild(component.child));
+    else node.textContent = String(resolveA2UIValue(component.label || component.text, surface) || 'Action').slice(0, 120);
+    node.addEventListener('click', () => dispatchA2UIAction(surface, component));
+  } else if (component.component === 'TextField') {
+    node = document.createElement('label');
+    node.className = 'a2ui-field';
+    const label = document.createElement('span');
+    label.textContent = String(component.label || 'Value').slice(0, 120);
+    const input = document.createElement('input');
+    input.type = component.variant === 'longText' ? 'text' : 'text';
+    input.value = String(resolveA2UIValue(component.value, surface) ?? '').slice(0, 2000);
+    if (component.value?.path) input.addEventListener('input', () => { surface.data = window.XR_A2UI.setPointer(surface.data, component.value.path, input.value); });
+    node.append(label, input);
+  } else if (component.component === 'Divider') {
+    node = document.createElement('hr');
+  } else if (component.component === 'Icon') {
+    node = document.createElement('span');
+    node.className = 'a2ui-icon';
+    node.textContent = { note: '◇', apps: '◫', terminal: '⌁', info: 'i' }[component.name] || '✦';
+  } else {
+    node = document.createElement('div');
+    if (component.component === 'Card') node.className = 'a2ui-card';
+    if (component.component === 'Column') node.className = 'a2ui-column';
+    if (component.component === 'Row') node.className = 'a2ui-row';
+    if (component.child) node.append(renderChild(component.child));
+    for (const child of Array.isArray(component.children) ? component.children : []) node.append(renderChild(child));
+  }
+  node.dataset.a2uiComponent = component.id;
+  return node;
+}
+
+function removeA2UISurface(surfaceId, emitClose = false) {
+  const surface = a2uiStore.surfaces.get(surfaceId);
+  if (emitClose && surface) recordA2UIEvent(surface, 'xr_shell_close', 'xr.shell.surfaceClosed', {});
+  const record = a2uiNodes.get(surfaceId);
+  record?.cleanup?.();
+  record?.node.remove();
+  a2uiNodes.delete(surfaceId);
+  if (surface) window.XR_A2UI.applyMessages(a2uiStore, { version: window.XR_A2UI.VERSION, deleteSurface: { surfaceId } });
+  if (widgetLibrary.open) renderWidgetLibrary();
+}
+
+function bindA2UISurfaceDrag(surface, node) {
+  const handle = node.querySelector('.a2ui-surface-header');
+  let gesture = null;
+  const finish = (event = {}) => {
+    if (!gesture || (Number.isFinite(event.pointerId) && event.pointerId !== gesture.pointerId)) return;
+    const previous = gesture;
+    gesture = null;
+    node.classList.remove('dragging');
+    try { if (handle.hasPointerCapture(previous.pointerId)) handle.releasePointerCapture(previous.pointerId); } catch { /* already released */ }
+  };
+  const update = (event) => {
+    if (!gesture || event.pointerId !== gesture.pointerId) return;
+    if (!(event.buttons & 1)) return finish(event);
+    const x = clamp(gesture.x + event.clientX - gesture.startX, -a2uiStage.clientWidth * .46, a2uiStage.clientWidth * .46);
+    const y = clamp(gesture.y + event.clientY - gesture.startY, -a2uiStage.clientHeight * .44, a2uiStage.clientHeight * .44);
+    surface.placement.x = x;
+    surface.placement.y = y;
+    node.style.setProperty('--surface-x', `${x}px`);
+    node.style.setProperty('--surface-y', `${y}px`);
+  };
+  handle.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || event.target.closest('button')) return;
+    event.preventDefault();
+    a2uiFrontOrder += 1;
+    node.style.zIndex = String(700 + a2uiFrontOrder);
+    gesture = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: Number(surface.placement.x || 0), y: Number(surface.placement.y || 0) };
+    handle.setPointerCapture(event.pointerId);
+    node.classList.add('dragging');
+  });
+  handle.addEventListener('pointermove', update);
+  handle.addEventListener('pointerup', finish);
+  handle.addEventListener('pointercancel', finish);
+  handle.addEventListener('lostpointercapture', finish);
+  addEventListener('pointerup', finish, true);
+  const blur = () => finish({});
+  addEventListener('blur', blur);
+  return () => { removeEventListener('pointerup', finish, true); removeEventListener('blur', blur); };
+}
+
+function renderA2UISurface(surfaceId) {
+  const surface = a2uiStore.surfaces.get(surfaceId);
+  if (!surface || !surface.components.has('root')) return;
+  let record = a2uiNodes.get(surfaceId);
+  if (!record) {
+    const node = document.createElement('article');
+    node.className = 'a2ui-surface glass';
+    node.innerHTML = `<header class="a2ui-surface-header"><div><small>AGENT UI · A2UI ${window.XR_A2UI.VERSION.slice(1)}</small><strong></strong></div><nav><button type="button" data-a2ui-save title="Save this widget">SAVE</button><button type="button" data-a2ui-close aria-label="Close generated widget" title="Close">×</button></nav></header><div class="a2ui-surface-content"></div>`;
+    node.querySelector('[data-a2ui-close]').addEventListener('click', () => removeA2UISurface(surfaceId, true));
+    node.querySelector('[data-a2ui-save]').addEventListener('click', () => {
+      const current = a2uiStore.surfaces.get(surfaceId);
+      if (current) saveA2UISurface(current);
+    });
+    a2uiStage.append(node);
+    record = { node, cleanup: bindA2UISurfaceDrag(surface, node) };
+    a2uiNodes.set(surfaceId, record);
+  }
+  const { node } = record;
+  const fallback = [...surface.components.values()].find((component) => component.component === 'Text');
+  node.querySelector('header strong').textContent = String(surface.placement.title || resolveA2UIValue(fallback?.text, surface) || surfaceId).slice(0, 80);
+  const isSaved = savedA2UIWidgets.some((item) => item.surfaceId === surfaceId);
+  const saveButton = node.querySelector('[data-a2ui-save]');
+  saveButton.textContent = isSaved ? 'SAVED' : 'SAVE';
+  saveButton.classList.toggle('saved', isSaved);
+  node.querySelector('.a2ui-surface-content').replaceChildren(renderA2UIComponent(surface, 'root'));
+  const ordinal = Math.max(0, a2uiNodes.size - 1);
+  if (!Number.isFinite(surface.placement.x)) surface.placement.x = (ordinal % 3 - 1) * 360;
+  if (!Number.isFinite(surface.placement.y)) surface.placement.y = (ordinal % 2) * 150 - 75;
+  node.style.setProperty('--surface-x', `${surface.placement.x}px`);
+  node.style.setProperty('--surface-y', `${surface.placement.y}px`);
+  node.style.setProperty('--surface-width', `${clamp(Number(surface.placement.width) || 360, 260, 620)}px`);
+  a2uiFrontOrder += 1;
+  node.style.zIndex = String(700 + a2uiFrontOrder);
+}
+
+function applyA2UI(messages, placement = {}) {
+  const result = window.XR_A2UI.applyMessages(a2uiStore, messages, { placement });
+  result.deleted.forEach((surfaceId) => {
+    const record = a2uiNodes.get(surfaceId);
+    record?.cleanup?.();
+    record?.node.remove();
+    a2uiNodes.delete(surfaceId);
+  });
+  result.changed.forEach(renderA2UISurface);
+  return { ok: true, ...result, surfaces: window.XR_A2UI.summarize(a2uiStore) };
+}
+
+function safeSurfaceId(prefix, requested) {
+  const candidate = String(requested || `${prefix}_${Date.now()}`).replace(/[^A-Za-z0-9_.:-]/g, '_').slice(0, 128);
+  return /^[A-Za-z_]/.test(candidate) ? candidate : `${prefix}_${candidate}`;
+}
+
+function noteMessages(params) {
+  const surfaceId = safeSurfaceId('note', params.surfaceId);
+  return { surfaceId, messages: [
+    { version: window.XR_A2UI.VERSION, createSurface: { surfaceId, catalogId: window.XR_A2UI.BASIC_CATALOG } },
+    { version: window.XR_A2UI.VERSION, updateComponents: { surfaceId, components: [
+      { id: 'root', component: 'Card', child: 'note_column' },
+      { id: 'note_column', component: 'Column', children: ['note_icon', 'note_title', 'note_divider', 'note_body'] },
+      { id: 'note_icon', component: 'Icon', name: 'note' },
+      { id: 'note_title', component: 'Text', variant: 'h2', text: String(params.title || 'Floating note').slice(0, 120) },
+      { id: 'note_divider', component: 'Divider' },
+      { id: 'note_body', component: 'Text', text: String(params.body || '').slice(0, 5000) }
+    ] } }
+  ] };
+}
+
+function layoutSurfaceMessages(params, opened, failures) {
+  const surfaceId = safeSurfaceId('layout', params.surfaceId);
+  const components = [
+    { id: 'root', component: 'Card', child: 'layout_column' },
+    { id: 'layout_column', component: 'Column', children: ['layout_icon', 'layout_title', 'layout_divider'] },
+    { id: 'layout_icon', component: 'Icon', name: 'apps' },
+    { id: 'layout_title', component: 'Text', variant: 'h2', text: String(params.title || 'App layout').slice(0, 120) },
+    { id: 'layout_divider', component: 'Divider' }
+  ];
+  opened.forEach((app, index) => {
+    const row = `app_${index}`;
+    const name = `${row}_name`;
+    const focus = `${row}_focus`;
+    const focusLabel = `${focus}_label`;
+    const release = `${row}_release`;
+    const releaseLabel = `${release}_label`;
+    components.find((item) => item.id === 'layout_column').children.push(row);
+    components.push(
+      { id: row, component: 'Row', children: [name, focus, release] },
+      { id: name, component: 'Text', text: app.name },
+      { id: focusLabel, component: 'Text', text: 'Bring forward' },
+      { id: focus, component: 'Button', child: focusLabel, action: { event: { name: 'mcp.call', context: { tool: 'xr_shell_focus_app', arguments: { sourceId: app.sourceId } } } } },
+      { id: releaseLabel, component: 'Text', text: 'Release' },
+      { id: release, component: 'Button', child: releaseLabel, action: { event: { name: 'mcp.call', context: { tool: 'xr_shell_release_app', arguments: { sourceId: app.sourceId } } } } }
+    );
+  });
+  failures.forEach((failure, index) => {
+    const id = `failure_${index}`;
+    components.find((item) => item.id === 'layout_column').children.push(id);
+    components.push({ id, component: 'Text', text: `Could not open ${failure.query}: ${failure.error}` });
+  });
+  return { surfaceId, messages: [
+    { version: window.XR_A2UI.VERSION, createSurface: { surfaceId, catalogId: window.XR_A2UI.BASIC_CATALOG } },
+    { version: window.XR_A2UI.VERSION, updateComponents: { surfaceId, components } }
+  ] };
+}
+
 function syncSemanticGeometry(panel) {
   const surface = panel.querySelector('.capture-viewport');
   const video = surface.querySelector('video');
@@ -716,6 +1106,49 @@ function resolveCapturedApp(params = {}) {
 
 async function handleAgentControl(method, params = {}) {
   if (method === 'get_layout') return { activeSourceId: activeCaptureId, windows: [...capturedWindows.entries()].map(([id, captured]) => capturedLayoutItem(id, captured)) };
+  if (method === 'a2ui_capabilities') return {
+    version: window.XR_A2UI.VERSION,
+    supportedCatalogIds: [window.XR_A2UI.BASIC_CATALOG, window.XR_A2UI.XR_CATALOG],
+    components: window.XR_A2UI.COMPONENTS,
+    actionTools: Object.keys(a2uiActionMethods),
+    guarantees: ['draggable', 'closable'],
+    surfaces: window.XR_A2UI.summarize(a2uiStore)
+  };
+  if (method === 'a2ui_apply') return applyA2UI(params.messages, params.placement || {});
+  if (method === 'a2ui_delete') {
+    const surfaceId = safeSurfaceId('surface', params.surfaceId);
+    const existed = a2uiStore.surfaces.has(surfaceId);
+    removeA2UISurface(surfaceId, false);
+    return { ok: true, deleted: existed, surfaceId };
+  }
+  if (method === 'a2ui_events') {
+    const after = Math.max(0, Number(params.after) || 0);
+    const events = a2uiEvents.filter((event) => event.sequence > after);
+    return { events, cursor: a2uiEventSequence };
+  }
+  if (method === 'add_note') {
+    const note = noteMessages(params);
+    return applyA2UI(note.messages, { title: params.title || 'Floating note', x: params.x, y: params.y, width: params.width });
+  }
+  if (method === 'open_layout') {
+    if (!Array.isArray(params.apps) || !params.apps.length || params.apps.length > 3) throw new Error('A layout requires 1–3 apps');
+    const opened = [];
+    const failures = [];
+    for (const spec of params.apps) {
+      try {
+        const app = await handleAgentControl('pull_app', spec);
+        const transformed = await handleAgentControl('transform_app', { sourceId: app.sourceId, x: spec.x, y: spec.y, width: spec.width, height: spec.height });
+        opened.push(transformed);
+      } catch (error) {
+        failures.push({ query: spec.query || spec.sourceId || 'app', error: error.message });
+      }
+    }
+    const layout = layoutSurfaceMessages(params, opened, failures);
+    const surface = applyA2UI(layout.messages, { title: params.title || 'App layout', x: params.x, y: params.y, width: 430 });
+    const liveSurface = a2uiStore.surfaces.get(layout.surfaceId);
+    if (liveSurface) liveSurface.resumeAction = { method: 'open_layout', params: JSON.parse(JSON.stringify({ ...params, surfaceId: layout.surfaceId })) };
+    return { opened, failures, surfaceId: layout.surfaceId, surface };
+  }
   if (method === 'pull_app') {
     await loadWindows(true);
     const query = String(params.query || '').trim().toLowerCase();
@@ -1143,6 +1576,11 @@ document.getElementById('refresh-windows').addEventListener('click', async (even
   await loadWindows(true).catch(() => {});
   event.currentTarget.classList.remove('active');
 });
+document.getElementById('open-widgets').addEventListener('click', () => {
+  renderWidgetLibrary();
+  widgetLibrary.showModal();
+});
+widgetLibrary.querySelector('[data-widgets-close]').addEventListener('click', () => widgetLibrary.close());
 document.getElementById('fullscreen').addEventListener('click', () => window.horizon.toggleFullscreen());
 document.getElementById('recenter').addEventListener('click', () => {
   centerWorkspace();
@@ -1278,6 +1716,7 @@ Promise.all([loadWindows(), window.horizon.isPreviewMode()]).then(async ([, prev
     { title: 'View', items: [{ title: 'Spatial Mode', enabled: true, mark: '✓', path: [3, 0, 0] }] },
     { title: 'Help', items: [{ title: 'XR Shell Help', enabled: true, path: [4, 0, 0] }] }
   ] }, 'preview-window');
+  await handleAgentControl('add_note', { title: 'Spatial note', body: 'A2UI surfaces stay in XR Shell after the agent finishes. Drag this card anywhere; close it when you are done.', x: -520, y: -210, width: 330 });
 }).catch(() => {
   windowPicker.innerHTML = '<option>Window capture unavailable</option>';
 });

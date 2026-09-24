@@ -17,6 +17,7 @@
         <button id="refresh-windows" aria-label="Refresh application windows" title="Refresh application windows">↻</button>
         <button id="add-window">Add app</button>
         <button id="open-profiles">Profiles</button>
+        <button id="open-widgets">Widgets</button>
         <select id="display-picker" aria-label="Target display"></select>
         <button id="open-display">Open XREAL</button>
         <button id="fullscreen" aria-label="Toggle fullscreen">⛶</button>
@@ -26,6 +27,7 @@
     <main id="viewport" class="viewport">
       <div id="workspace" class="workspace">
         <section id="app-stage" class="app-stage" aria-label="Live application windows"></section>
+        <section id="a2ui-stage" class="a2ui-stage" aria-label="Agent-generated spatial interfaces"></section>
         <section id="spatial-menubar" class="spatial-menubar glass" aria-label="Application menu bar" hidden>
           <button class="menu-drag" type="button" aria-label="Drag application menu bar" title="Drag in XR space">⠿</button>
           <strong id="menu-app-name">APP</strong>
@@ -125,6 +127,13 @@
         <pre id="profile-library-detail">Select View profile or View recording to inspect its local JSON.</pre>
       </div>
     </dialog>
+
+    <dialog id="widget-library" class="xr-dialog widget-library">
+      <header><div><small>PERSISTENT AGENT UI</small><h2>Saved spatial widgets</h2></div><button type="button" data-widgets-close aria-label="Close">×</button></header>
+      <p>Saved widgets remain available after their creating agent finishes. Turn them on or off locally, or delete them permanently.</p>
+      <div id="widget-library-list" class="widget-library-list"></div>
+    </dialog>
+    <script src="a2ui-runtime.js"></script>
     <script src="renderer.js"></script>
   </body>
 </html>
