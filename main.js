@@ -2,6 +2,7 @@
 
 const path = require('node:path');
 const fs = require('node:fs');
+const { spawn } = require('node:child_process');
 const { app, BrowserWindow, desktopCapturer, ipcMain, screen, shell, systemPreferences } = require('electron');
 const { ControlServer } = require('./control-server');
 const { HeadTracker } = require('./tracking');
@@ -95,14 +96,50 @@ async function availableApplicationWindows(includeImages = true) {
   }
 }
 
+function openApplication(params = {}) {
+  const appName = String(params.app || '').trim().slice(0, 240);
+  const bundleId = String(params.bundleId || '').trim().slice(0, 240);
+  if (!appName && !bundleId) return Promise.reject(new Error('app or bundleId is required'));
+  if (appName.includes('\0') || bundleId.includes('\0')) return Promise.reject(new Error('Invalid application identifier'));
+  const args = bundleId ? ['-b', bundleId] : path.isAbsolute(appName) ? [appName] : ['-a', appName];
+  if (path.isAbsolute(appName) && (!appName.endsWith('.app') || !fs.existsSync(appName))) return Promise.reject(new Error('Application path must point to an existing .app bundle'));
+  return new Promise((resolve, reject) => {
+    const child = spawn('/usr/bin/open', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    let errorText = '';
+    child.stderr.on('data', (chunk) => { errorText = `${errorText}${chunk}`.slice(-1200); });
+    child.once('error', reject);
+    child.once('exit', (code) => code === 0 ? resolve() : reject(new Error(errorText.trim() || `Could not launch application (${code})`)));
+  });
+}
+
+async function launchApplicationWindow(params = {}) {
+  const before = new Set((await availableApplicationWindows(false)).map((item) => item.id));
+  await openApplication(params);
+  const query = String(params.windowQuery || params.app || '').replace(/\.app$/i, '').trim().toLowerCase();
+  const waitMs = Math.max(1000, Math.min(30000, Number(params.waitMs) || 12000));
+  const deadline = Date.now() + waitMs;
+  let latest = [];
+  while (Date.now() < deadline) {
+    latest = await availableApplicationWindows(false);
+    const fresh = latest.filter((item) => !before.has(item.id));
+    const match = fresh.find((item) => query && item.name.toLowerCase().includes(query))
+      || fresh[0]
+      || latest.find((item) => query && item.name.toLowerCase().includes(query));
+    if (match) return { ok: true, source: match, launched: params.bundleId || params.app };
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  throw new Error('Application launched, but no capturable window appeared before the timeout');
+}
+
 function requestRendererControl(method, params = {}) {
   if (!mainWindow || mainWindow.isDestroyed()) return Promise.reject(new Error('XR Shell window is not ready'));
   const id = ++controlSequence;
   return new Promise((resolve, reject) => {
+    const timeoutMs = ['launch_app', 'open_layout'].includes(method) ? 45000 : 10000;
     const timeout = setTimeout(() => {
       controlPending.delete(id);
       reject(new Error(`XR Shell control timed out: ${method}`));
-    }, 10000);
+    }, timeoutMs);
     controlPending.set(id, { resolve, reject, timeout });
     mainWindow.webContents.send('control:request', { id, method, params });
   });
@@ -279,6 +316,7 @@ app.whenReady().then(() => {
   ipcMain.handle('input:status', () => inputBridge.request({ type: 'status', prompt: false }));
   ipcMain.handle('input:enable', () => inputBridge.request({ type: 'status', prompt: true }));
   ipcMain.handle('input:open-settings', () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'));
+  ipcMain.handle('app:launch', (_event, params) => launchApplicationWindow(params || {}));
   ipcMain.handle('menu:snapshot', async (_event, sourceId) => {
     const windowId = sourceWindowId(sourceId);
     return windowId === null ? { ok: false, error: 'invalid-window-source' } : inputBridge.request({ type: 'menu-snapshot', windowId });

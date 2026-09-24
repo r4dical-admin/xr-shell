@@ -181,7 +181,7 @@ async function loadWindows(force = false) {
   try { await windowRefreshPromise; } finally { windowRefreshPromise = null; }
 }
 
-async function captureWindow(source) {
+async function captureWindow(source, profileName = source?.name) {
   if (!source) return null;
   if (capturedWindows.has(source.id)) {
     bringCaptureToFront(source.id, capturedWindows.get(source.id).panel);
@@ -202,9 +202,13 @@ async function captureWindow(source) {
   const captured = { source, panel, stream: null, profiling: false, profileEndsAt: 0, theme: null, spatialCleanup: null };
   capturedWindows.set(source.id, captured);
   setVisualMode(panel, 'fx', false);
-  window.horizon.themeForApp(source.name).then((theme) => {
-    if (theme && capturedWindows.has(source.id)) applyProfileTheme(panel, theme);
-  });
+  try {
+    const theme = await window.horizon.themeForApp(profileName) || (profileName !== source.name ? await window.horizon.themeForApp(source.name) : null);
+    if (theme && capturedWindows.has(source.id)) {
+      captured.theme = theme;
+      applyProfileTheme(panel, theme);
+    }
+  } catch { /* an app without a profile keeps the generic FX treatment */ }
   panel.querySelector('.capture-viewport').classList.toggle('input-enabled', inputEnabled);
   panel.querySelector('[data-remove]').addEventListener('click', () => removeCapturedWindow(source.id));
   bindCapturedInput(source.id, panel);
@@ -747,6 +751,7 @@ function resolveA2UIValue(value, surface) {
 
 const a2uiActionMethods = {
   xr_shell_pull_app: 'pull_app',
+  xr_shell_launch_app: 'launch_app',
   xr_shell_focus_app: 'focus_app',
   xr_shell_transform_app: 'transform_app',
   xr_shell_release_app: 'release_app',
@@ -1092,7 +1097,8 @@ function capturedLayoutItem(sourceId, captured) {
     y: Number(captured.panel.dataset.offsetY || 0),
     width: captured.panel.offsetWidth,
     height: captured.panel.offsetHeight,
-    visualMode: captured.panel.visualMode || 'fx'
+    visualMode: captured.panel.visualMode || 'fx',
+    profileApplied: Boolean(captured.panel.xrTheme)
   };
 }
 
@@ -1130,13 +1136,30 @@ async function handleAgentControl(method, params = {}) {
     const note = noteMessages(params);
     return applyA2UI(note.messages, { title: params.title || 'Floating note', x: params.x, y: params.y, width: params.width });
   }
+  if (method === 'launch_app') {
+    const launched = await window.horizon.launchApp(params);
+    const captured = await handleAgentControl('pull_app', { sourceId: launched.source.id, profileName: params.app || params.bundleId });
+    const transformed = await handleAgentControl('transform_app', { sourceId: captured.sourceId, x: params.x, y: params.y, width: params.width, height: params.height });
+    return { ...transformed, launched: launched.launched, profileApplied: transformed.profileApplied };
+  }
   if (method === 'open_layout') {
     if (!Array.isArray(params.apps) || !params.apps.length || params.apps.length > 3) throw new Error('A layout requires 1–3 apps');
     const opened = [];
     const failures = [];
     for (const spec of params.apps) {
       try {
-        const app = await handleAgentControl('pull_app', spec);
+        let app;
+        try {
+          app = await handleAgentControl('pull_app', spec);
+        } catch (pullError) {
+          if (spec.launch === false) throw pullError;
+          app = await handleAgentControl('launch_app', {
+            app: spec.app || spec.query,
+            bundleId: spec.bundleId,
+            windowQuery: spec.windowQuery || spec.query,
+            waitMs: spec.waitMs
+          });
+        }
         const transformed = await handleAgentControl('transform_app', { sourceId: app.sourceId, x: spec.x, y: spec.y, width: spec.width, height: spec.height });
         opened.push(transformed);
       } catch (error) {
@@ -1156,7 +1179,7 @@ async function handleAgentControl(method, params = {}) {
       || availableWindows.find((item) => item.name.toLowerCase() === query)
       || availableWindows.find((item) => query && item.name.toLowerCase().includes(query));
     if (!source) throw new Error('No matching open application window');
-    await captureWindow(source);
+    await captureWindow(source, params.profileName || source.name);
     return capturedLayoutItem(source.id, capturedWindows.get(source.id));
   }
   const match = resolveCapturedApp(params);

@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('horizon', {
   inputStatus: () => ipcRenderer.invoke('input:status'),
   enableInput: () => ipcRenderer.invoke('input:enable'),
   openInputSettings: () => ipcRenderer.invoke('input:open-settings'),
+  launchApp: (request) => ipcRenderer.invoke('app:launch', request),
   menuSnapshot: (sourceId) => ipcRenderer.invoke('menu:snapshot', sourceId),
   activateMenu: (sourceId, menuPath) => ipcRenderer.invoke('menu:activate', sourceId, menuPath),
   toggleProfile: (sourceId, enabled) => ipcRenderer.invoke('profile:toggle', sourceId, enabled),
