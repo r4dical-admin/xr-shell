@@ -11,10 +11,10 @@ class HeadView {
     this.pitch = 0;
   }
 
-  update(yaw, pitch, dt, viewportWidth, viewportHeight, fov, virtualScale) {
+  update(yaw, pitch, dt, viewportWidth, viewportHeight, fov, virtualScale, virtualHeightScale = 1) {
     const focal = viewportHeight / (2 * Math.tan(fov * Math.PI / 360));
     const maxPanX = viewportWidth * Math.max(0, virtualScale - 1) / 2;
-    const maxPanY = viewportHeight * 0.08;
+    const maxPanY = Math.max(viewportHeight * 0.08, viewportHeight * Math.max(0, virtualHeightScale - 1) / 2);
     const clamp = (value, limit) => Math.max(-limit, Math.min(limit, value));
     const targetYaw = clamp(Number.isFinite(yaw) ? yaw : this.yaw, Math.atan(maxPanX / focal));
     const targetPitch = clamp(Number.isFinite(pitch) ? pitch : this.pitch, Math.atan(maxPanY / focal));

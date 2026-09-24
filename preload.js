@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('horizon', {
   toggleProfile: (sourceId, enabled) => ipcRenderer.invoke('profile:toggle', sourceId, enabled),
   themeForApp: (appName) => ipcRenderer.invoke('profile:theme-for-app', appName),
   sendChat: (request) => ipcRenderer.invoke('chat:send', request),
+  deleteChat: (clientId) => ipcRenderer.invoke('chat:delete', clientId),
   onChatEvent: (callback) => {
     const listener = (_event, value) => callback(value);
     ipcRenderer.on('chat:event', listener);

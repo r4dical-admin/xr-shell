@@ -10,6 +10,12 @@ test('virtual scale determines the available horizontal workspace', () => {
   assert.equal(view.maxPanX, 1500);
 });
 
+test('virtual height scale determines the available vertical workspace', () => {
+  const view = new HeadView().update(0, 2, 1, 1500, 900, 46, 2, 2);
+  assert.ok(Math.abs(view.y - 450) < 0.001);
+  assert.equal(view.maxPanY, 450);
+});
+
 test('damping is independent of refresh rate', () => {
   const sixty = new HeadView();
   const oneTwenty = new HeadView();

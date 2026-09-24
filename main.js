@@ -231,6 +231,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('profile:theme-for-app', (_event, appName) => profileStore.themeForAppName(String(appName || '').slice(0, 300)));
   ipcMain.handle('chat:send', (_event, request) => chatRunner.send(request || {}));
+  ipcMain.handle('chat:delete', (_event, clientId) => ({ ok: true, stopped: chatRunner.stop(String(clientId || '')) }));
   ipcMain.on('input:event', (_event, value) => {
     const command = inputCommand(value);
     if (!command) return;

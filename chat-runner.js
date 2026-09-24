@@ -48,6 +48,14 @@ class ChatRunner {
     return { accepted: true, clientId };
   }
 
+  stop(clientId) {
+    const child = this.processes.get(clientId);
+    if (!child) return false;
+    this.processes.delete(clientId);
+    child.kill();
+    return true;
+  }
+
   stopAll() {
     for (const child of this.processes.values()) child.kill();
     this.processes.clear();

@@ -8,10 +8,10 @@ function requireRendererHeadView() {
   class RendererHeadView {
     constructor() { this.yaw = 0; this.pitch = 0; }
     reset() { this.yaw = 0; this.pitch = 0; }
-    update(yaw, pitch, dt, width, height, fov, scale) {
+    update(yaw, pitch, dt, width, height, fov, scale, heightScale = 1) {
       const focal = height / (2 * Math.tan(fov * Math.PI / 360));
       const maxPanX = width * Math.max(0, scale - 1) / 2;
-      const maxPanY = height * 0.08;
+      const maxPanY = Math.max(height * 0.08, height * Math.max(0, heightScale - 1) / 2);
       const clamp = (value, limit) => Math.max(-limit, Math.min(limit, value));
       const targetYaw = clamp(Number.isFinite(yaw) ? yaw : this.yaw, Math.atan(maxPanX / focal));
       const targetPitch = clamp(Number.isFinite(pitch) ? pitch : this.pitch, Math.atan(maxPanY / focal));
@@ -51,6 +51,8 @@ const trackingStatus = document.querySelector('.tracking-status');
 const displayPicker = document.getElementById('display-picker');
 const scaleInput = document.getElementById('scale');
 const scaleOutput = document.getElementById('scale-output');
+const heightScaleInput = document.getElementById('height-scale');
+const heightScaleOutput = document.getElementById('height-scale-output');
 const canvasReadout = document.getElementById('canvas-readout');
 const minimapView = document.getElementById('minimap-view');
 const connectButton = document.getElementById('connect');
@@ -61,6 +63,8 @@ const chatInput = document.getElementById('chat-input');
 const chatSend = document.getElementById('chat-send');
 const chatResponse = document.getElementById('chat-response');
 const sessionList = document.getElementById('session-list');
+const liveWindowSummary = document.getElementById('live-window-summary');
+const liveWindowCount = document.getElementById('live-window-count');
 
 const headView = new HeadView();
 const pitchStabilizer = new PitchStabilizer();
@@ -70,8 +74,12 @@ let trackingEnabled = false;
 let poseTime = 0;
 let headQuaternion = [0, 0, 0, 1];
 let virtualScale = Number(scaleInput.value);
+let virtualHeightScale = Number(heightScaleInput.value);
 let availableWindows = [];
+let availableWindowsSignature = null;
+let windowRefreshPromise = null;
 const capturedWindows = new Map();
+let frontOrder = 0;
 let inputEnabled = false;
 let activeCaptureId = null;
 let lastDragSent = 0;
@@ -121,9 +129,17 @@ async function loadDisplays() {
   }).join('');
 }
 
-async function loadWindows() {
+async function loadWindows(force = false) {
+  if (windowRefreshPromise) return windowRefreshPromise;
+  windowRefreshPromise = (async () => {
   const selected = windowPicker.value;
-  availableWindows = await window.horizon.listWindows();
+  const nextWindows = await window.horizon.listWindows();
+  const nextSignature = nextWindows.map((source) => `${source.id}:${source.name}`).sort().join('|');
+  availableWindows = nextWindows;
+  liveWindowCount.textContent = String(availableWindows.length);
+  liveWindowSummary.textContent = `${availableWindows.length} active window${availableWindows.length === 1 ? '' : 's'} · refreshed live`;
+  if (!force && nextSignature === availableWindowsSignature) return;
+  availableWindowsSignature = nextSignature;
   if (!availableWindows.length) {
     const permission = await window.horizon.capturePermission();
     windowPicker.innerHTML = `<option value="">${permission === 'denied' ? 'Enable Screen Recording in System Settings' : 'No capturable windows found'}</option>`;
@@ -133,6 +149,8 @@ async function loadWindows() {
     .map((source) => `<option value="${escapeHtml(source.id)}">${escapeHtml(source.name)}</option>`)
     .join('');
   if (availableWindows.some((source) => source.id === selected)) windowPicker.value = selected;
+  })();
+  try { await windowRefreshPromise; } finally { windowRefreshPromise = null; }
 }
 
 async function captureWindow(source) {
@@ -145,11 +163,12 @@ async function captureWindow(source) {
   const panel = document.createElement('article');
   panel.className = 'captured-window glass';
   panel.innerHTML = `
-    <header title="Drag to move this window in the workspace"><div class="capture-title">${source.appIcon ? `<img src="${source.appIcon}" alt="" />` : '<i></i>'}<div><small>HOLOGRAPHIC WINDOW LINK · GRAB TO MOVE</small><span>${escapeHtml(source.name)}</span></div></div><div class="capture-actions"><em>● LIVE</em><button type="button" data-profile aria-label="Learn accessibility profile">AX</button><button type="button" data-smaller aria-label="Make window smaller">−</button><button type="button" data-larger aria-label="Make window larger">+</button><button type="button" data-fx>FX</button><button type="button" data-remove aria-label="Remove window">×</button></div></header>
+    <header title="Drag to move this window in the workspace"><div class="capture-title">${source.appIcon ? `<img src="${source.appIcon}" alt="" />` : '<i></i>'}<div><small>HOLOGRAPHIC WINDOW LINK · GRAB TO MOVE</small><span>${escapeHtml(source.name)}</span></div></div><div class="capture-actions"><em>● LIVE</em><button type="button" data-profile aria-label="Learn accessibility profile">AX</button><button type="button" data-theme aria-label="Toggle generated theme" title="No generated theme yet">THEME —</button><button type="button" data-front aria-label="Bring window to front">FRONT</button><button type="button" data-smaller aria-label="Make window smaller">−</button><button type="button" data-larger aria-label="Make window larger">+</button><button type="button" data-fx>FX</button><button type="button" data-remove aria-label="Remove window">×</button></div></header>
     <div class="capture-viewport">${source.thumbnail ? `<img class="capture-placeholder" src="${source.thumbnail}" alt="Preview of ${escapeHtml(source.name)}" />` : '<div class="capture-empty"><strong>SCREEN RECORDING REQUIRED</strong>Allow access in Privacy & Security, then add this window again.</div>'}<div class="semantic-layer" aria-hidden="true"></div><div class="xr-cursor" aria-hidden="true"><i></i></div><div class="capture-overlay"><i></i><i></i><i></i><i></i><span>OPTICAL FEED · SECURE</span></div></div>
     <footer><span>30 FPS · GLASS-02 · MIRRORED SURFACE</span><b>DRAG CORNER TO RESIZE</b></footer><div class="resize-grip" title="Drag to resize" aria-hidden="true"></div>`;
   appStage.append(panel);
-  capturedWindows.set(source.id, { panel, stream: null, profiling: false, profileEndsAt: 0 });
+  const captured = { panel, stream: null, profiling: false, profileEndsAt: 0, theme: null, spatialCleanup: null };
+  capturedWindows.set(source.id, captured);
   window.horizon.themeForApp(source.name).then((theme) => {
     if (theme && capturedWindows.has(source.id)) applyProfileTheme(panel, theme);
   });
@@ -159,7 +178,16 @@ async function captureWindow(source) {
   bindCapturedInput(source.id, panel);
   bindSpatialControls(source.id, panel);
   bindProfileControls(source.id, panel);
+  panel.querySelector('[data-theme]').addEventListener('click', () => {
+    if (!panel.xrTheme) {
+      trackingState.textContent = 'No generated theme yet · press AX to learn this app';
+      return;
+    }
+    setThemeEnabled(panel, !panel.classList.contains('profile-themed'));
+  });
+  panel.querySelector('[data-front]').addEventListener('click', () => bringCaptureToFront(source.id, panel));
   layoutCapturedWindows();
+  bringCaptureToFront(source.id, panel);
   centerWorkspace();
 
   try {
@@ -196,6 +224,7 @@ function removeCapturedWindow(id) {
   if (!captured) return;
   captured.stream?.getTracks().forEach((track) => track.stop());
   captured.resizeObserver?.disconnect();
+  captured.spatialCleanup?.();
   if (captured.profiling) window.horizon.toggleProfile(id, false);
   captured.panel.remove();
   capturedWindows.delete(id);
@@ -211,7 +240,7 @@ function semanticLabel(element) {
 
 function applyProfileTheme(panel, theme) {
   if (!theme?.palette) return;
-  panel.classList.add('profile-themed');
+  panel.xrTheme = theme;
   panel.dataset.motif = theme.motif || 'system';
   panel.style.setProperty('--profile-accent', theme.palette.accent);
   panel.style.setProperty('--profile-secondary', theme.palette.secondary);
@@ -219,7 +248,33 @@ function applyProfileTheme(panel, theme) {
   panel.style.setProperty('--profile-line', theme.palette.line);
   panel.style.setProperty('--profile-ink', theme.palette.ink);
   panel.style.setProperty('--profile-video-filter', theme.videoFilter);
-  panel.querySelector('.capture-title small').textContent = `${String(theme.name || 'XR PROFILE').toUpperCase()} · GRAB TO MOVE`;
+  setThemeEnabled(panel, true);
+}
+
+function setThemeEnabled(panel, enabled) {
+  const available = Boolean(panel.xrTheme);
+  const active = available && enabled;
+  panel.classList.toggle('profile-themed', active);
+  const button = panel.querySelector('[data-theme]');
+  button.classList.toggle('active', active);
+  button.textContent = available ? `THEME ${active ? 'ON' : 'OFF'}` : 'THEME —';
+  button.title = available ? `${panel.xrTheme.name} · click to compare ${active ? 'original' : 'themed'} view` : 'No generated theme yet';
+  panel.querySelector('.capture-title small').textContent = active
+    ? `${String(panel.xrTheme.name || 'XR PROFILE').toUpperCase()} · THEME ON`
+    : 'HOLOGRAPHIC WINDOW LINK · THEME OFF';
+  trackingState.textContent = available ? `${panel.xrTheme.name} · theme ${active ? 'enabled' : 'disabled'}` : trackingState.textContent;
+}
+
+function bringCaptureToFront(sourceId, panel) {
+  frontOrder += 1;
+  for (const [id, captured] of capturedWindows) {
+    const isFront = id === sourceId;
+    captured.panel.classList.toggle('frontmost', isFront);
+    const button = captured.panel.querySelector('[data-front]');
+    button.classList.toggle('active', isFront);
+    button.textContent = isFront ? '● FRONT' : 'FRONT';
+  }
+  panel.style.zIndex = String(100 + frontOrder);
 }
 
 function syncSemanticGeometry(panel) {
@@ -377,6 +432,7 @@ function selectCapture(sourceId, panel) {
   activeCaptureId = sourceId;
   for (const captured of capturedWindows.values()) captured.panel.classList.remove('input-active');
   panel.classList.add('input-active');
+  bringCaptureToFront(sourceId, panel);
   panel.focus({ preventScroll: true });
 }
 
@@ -496,10 +552,12 @@ function renderSessions() {
     sessionList.append(empty);
     return;
   }
-  for (const session of sessions.slice(0, 6)) {
-    const row = document.createElement('button');
-    row.type = 'button';
+  for (const session of sessions.slice(0, 20)) {
+    const row = document.createElement('div');
     row.className = `session-row${session.clientId === activeSessionId ? ' active' : ''}`;
+    const select = document.createElement('button');
+    select.type = 'button';
+    select.className = 'session-select';
     const indicator = document.createElement('i');
     indicator.className = ['starting', 'working', 'command_execution'].includes(session.status) ? 'running' : '';
     indicator.textContent = session.status === 'complete' ? '✓' : '◌';
@@ -507,14 +565,40 @@ function renderSessions() {
     const title = document.createElement('strong');
     title.textContent = session.title;
     const detail = document.createElement('small');
-    detail.textContent = session.status === 'complete' ? 'Ready to continue' : session.status;
+    detail.textContent = session.status === 'complete' ? 'Ready to continue' : session.status === 'draft' ? 'New session' : session.status;
     copy.append(title, detail);
     const time = document.createElement('time');
     time.textContent = relativeSessionTime(session.updatedAt);
-    row.append(indicator, copy, time);
-    row.addEventListener('click', () => { activeSessionId = session.clientId; renderSessions(); renderChat(session); });
+    select.append(indicator, copy, time);
+    select.addEventListener('click', () => { activeSessionId = session.clientId; renderSessions(); renderChat(session); });
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'session-delete';
+    remove.setAttribute('aria-label', `Delete ${session.title}`);
+    remove.title = 'Delete this session from XR Shell';
+    remove.textContent = '×';
+    remove.addEventListener('click', async () => {
+      await window.horizon.deleteChat(session.clientId);
+      sessions = sessions.filter((item) => item.clientId !== session.clientId);
+      if (activeSessionId === session.clientId) activeSessionId = sessions[0]?.clientId || null;
+      saveSessions();
+      renderSessions();
+      renderChat(sessions.find((item) => item.clientId === activeSessionId) || null);
+    });
+    row.append(select, remove);
     sessionList.append(row);
   }
+}
+
+function createChatSession() {
+  const session = { clientId: crypto.randomUUID(), threadId: null, title: 'New session', status: 'draft', updatedAt: Date.now(), messages: [] };
+  sessions.unshift(session);
+  activeSessionId = session.clientId;
+  saveSessions();
+  renderSessions();
+  renderChat(session);
+  chatInput.focus();
+  return session;
 }
 
 function renderChat(session) {
@@ -547,6 +631,7 @@ async function submitChat() {
     sessions.unshift(session);
     activeSessionId = session.clientId;
   }
+  if (session.status === 'draft') session.title = prompt.slice(0, 48);
   session.messages.push({ role: 'user', text: prompt });
   session.status = 'starting';
   session.updatedAt = Date.now();
@@ -588,6 +673,8 @@ function bindSpatialControls(sourceId, panel) {
     const rect = panel.getBoundingClientRect();
     gesture = {
       mode,
+      pointerId: event.pointerId,
+      captureTarget: event.currentTarget,
       startX: event.clientX,
       startY: event.clientY,
       offsetX: Number(panel.dataset.offsetX || 0),
@@ -600,7 +687,11 @@ function bindSpatialControls(sourceId, panel) {
   };
 
   const update = (event) => {
-    if (!gesture) return;
+    if (!gesture || event.pointerId !== gesture.pointerId) return;
+    if ((event.buttons & 1) === 0) {
+      finish(event);
+      return;
+    }
     const dx = event.clientX - gesture.startX;
     const dy = event.clientY - gesture.startY;
     if (gesture.mode === 'resize') {
@@ -620,10 +711,13 @@ function bindSpatialControls(sourceId, panel) {
   };
 
   const finish = (event) => {
-    if (!gesture) return;
+    if (!gesture || (Number.isFinite(event.pointerId) && event.pointerId !== gesture.pointerId)) return;
+    const { captureTarget, pointerId } = gesture;
     gesture = null;
     panel.classList.remove('positioning');
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    try {
+      if (captureTarget.hasPointerCapture(pointerId)) captureTarget.releasePointerCapture(pointerId);
+    } catch { /* pointer capture may already have been released by the OS */ }
   };
 
   header.addEventListener('pointerdown', (event) => begin(event, 'move'));
@@ -634,6 +728,17 @@ function bindSpatialControls(sourceId, panel) {
   grip.addEventListener('pointermove', update);
   grip.addEventListener('pointerup', finish);
   grip.addEventListener('pointercancel', finish);
+  header.addEventListener('lostpointercapture', finish);
+  grip.addEventListener('lostpointercapture', finish);
+  addEventListener('pointerup', finish, true);
+  addEventListener('pointercancel', finish, true);
+  const finishOnBlur = () => finish({});
+  addEventListener('blur', finishOnBlur);
+  capturedWindows.get(sourceId).spatialCleanup = () => {
+    removeEventListener('pointerup', finish, true);
+    removeEventListener('pointercancel', finish, true);
+    removeEventListener('blur', finishOnBlur);
+  };
 
   panel.querySelector('[data-smaller]').addEventListener('click', () => {
     const rect = panel.getBoundingClientRect();
@@ -649,6 +754,11 @@ document.getElementById('open-display').addEventListener('click', () => window.h
 document.getElementById('add-window').addEventListener('click', () => {
   const source = availableWindows.find((item) => item.id === windowPicker.value);
   captureWindow(source);
+});
+document.getElementById('refresh-windows').addEventListener('click', async (event) => {
+  event.currentTarget.classList.add('active');
+  await loadWindows(true).catch(() => {});
+  event.currentTarget.classList.remove('active');
 });
 document.getElementById('fullscreen').addEventListener('click', () => window.horizon.toggleFullscreen());
 document.getElementById('recenter').addEventListener('click', () => {
@@ -699,8 +809,15 @@ scaleInput.addEventListener('input', () => {
   virtualScale = Number(scaleInput.value);
   workspace.style.width = `${virtualScale * 100}vw`;
   scaleOutput.value = `${virtualScale.toFixed(2).replace(/0$/, '')}×`;
-  canvasReadout.textContent = `${virtualScale.toFixed(2).replace(/0$/, '')}× physical width`;
+  canvasReadout.textContent = `${virtualScale.toFixed(2).replace(/0$/, '')}× width · ${virtualHeightScale.toFixed(2).replace(/0$/, '')}× height`;
   minimapView.style.width = `${100 / virtualScale}%`;
+});
+heightScaleInput.addEventListener('input', () => {
+  virtualHeightScale = Number(heightScaleInput.value);
+  workspace.style.height = `${virtualHeightScale * 100}%`;
+  heightScaleOutput.value = `${virtualHeightScale.toFixed(2).replace(/0$/, '')}×`;
+  canvasReadout.textContent = `${virtualScale.toFixed(2).replace(/0$/, '')}× width · ${virtualHeightScale.toFixed(2).replace(/0$/, '')}× height`;
+  minimapView.style.height = `${100 / virtualHeightScale}%`;
 });
 
 window.horizon.onPose((pose) => {
@@ -752,13 +869,16 @@ function animate(now) {
   }
 
   const bounds = viewport.getBoundingClientRect();
-  const view = headView.update(targetYaw, targetPitch, dt, bounds.width, bounds.height, 46, virtualScale);
+  const view = headView.update(targetYaw, targetPitch, dt, bounds.width, bounds.height, 46, virtualScale, virtualHeightScale);
   targetYaw = view.targetYaw;
   targetPitch = view.targetPitch;
-  workspace.style.transform = `translate3d(calc(-50% + ${view.x}px), ${view.y}px, 0)`;
+  workspace.style.transform = `translate3d(calc(-50% + ${view.x}px), calc(-50% + ${view.y}px), 0)`;
   const travel = view.maxPanX ? (-view.x + view.maxPanX) / (view.maxPanX * 2) : 0.5;
   const miniWidth = 100 / virtualScale;
   minimapView.style.left = `${Math.max(0, Math.min(100 - miniWidth, travel * (100 - miniWidth)))}%`;
+  const verticalTravel = view.maxPanY ? (-view.y + view.maxPanY) / (view.maxPanY * 2) : 0.5;
+  const miniHeight = 100 / virtualHeightScale;
+  minimapView.style.top = `${Math.max(0, Math.min(100 - miniHeight, verticalTravel * (100 - miniHeight)))}%`;
 }
 
 loadDisplays().catch(() => {
@@ -850,10 +970,7 @@ chatInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submitChat(); }
 });
 document.getElementById('new-session').addEventListener('click', () => {
-  activeSessionId = null;
-  renderSessions();
-  renderChat(null);
-  chatInput.focus();
+  createChatSession();
 });
 document.querySelectorAll('.quick-actions [data-prompt]').forEach((button) => button.addEventListener('click', () => {
   chatInput.value = button.dataset.prompt;
@@ -862,8 +979,8 @@ document.querySelectorAll('.quick-actions [data-prompt]').forEach((button) => bu
 renderSessions();
 renderChat(sessions.find((item) => item.clientId === activeSessionId) || null);
 setInterval(() => {
-  if (document.visibilityState === 'visible' && document.activeElement !== windowPicker) loadWindows().catch(() => {});
-}, 4000);
+  if (document.visibilityState === 'visible') loadWindows().catch(() => {});
+}, 2000);
 setInterval(() => {
   for (const captured of capturedWindows.values()) {
     if (!captured.profiling || !captured.profileEndsAt) continue;
