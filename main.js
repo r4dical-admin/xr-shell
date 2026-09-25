@@ -288,7 +288,8 @@ function createWindow() {
       sandbox: true
     }
   });
-  mainWindow.loadFile('index.html');
+  const previewTheme = String(process.env.XR_SHELL_THEME || '').trim();
+  mainWindow.loadFile('index.html', previewTheme ? { query: { shellTheme: previewTheme } } : undefined);
   if (process.env.HORIZON_CAPTURE === '1') {
     mainWindow.webContents.once('did-finish-load', () => {
       setTimeout(async () => {

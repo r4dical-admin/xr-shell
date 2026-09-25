@@ -7,7 +7,7 @@
     <title>XR Shell</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
+  <body data-shell-theme="horizon">
     <div class="atmosphere" aria-hidden="true"></div>
     <header class="topbar">
       <div class="brand"><span>XR / SHELL</span><strong>Spatial desktop</strong></div>
@@ -18,6 +18,13 @@
         <button id="add-window">Add app</button>
         <button id="open-profiles">Profiles</button>
         <button id="open-widgets">Widgets</button>
+        <select id="shell-theme-picker" aria-label="XR Shell theme" title="Change XR Shell theme">
+          <option value="horizon">Horizon Glass</option>
+          <option value="brass">Brass Observatory</option>
+          <option value="atomic">Atomic Tomorrow</option>
+          <option value="starship">Starship Command</option>
+          <option value="orbital">Orbital Lounge</option>
+        </select>
         <select id="display-picker" aria-label="Target display"></select>
         <button id="open-display">Open XREAL</button>
         <button id="fullscreen" aria-label="Toggle fullscreen">⛶</button>

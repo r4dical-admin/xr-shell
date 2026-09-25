@@ -79,6 +79,20 @@ const menuRoot = document.getElementById('menu-root');
 const menuState = document.getElementById('menu-state');
 const widgetLibrary = document.getElementById('widget-library');
 const widgetLibraryList = document.getElementById('widget-library-list');
+const shellThemePicker = document.getElementById('shell-theme-picker');
+
+const SHELL_THEMES = new Set(['horizon', 'brass', 'atomic', 'starship', 'orbital']);
+
+function applyShellTheme(requestedTheme, persist = true) {
+  const theme = SHELL_THEMES.has(requestedTheme) ? requestedTheme : 'horizon';
+  document.body.dataset.shellTheme = theme;
+  shellThemePicker.value = theme;
+  if (persist) localStorage.setItem('xr-shell:shell-theme', theme);
+  return theme;
+}
+
+const previewShellTheme = new URLSearchParams(location.search).get('shellTheme');
+applyShellTheme(previewShellTheme || localStorage.getItem('xr-shell:shell-theme') || 'horizon', false);
 
 const headView = new HeadView();
 const pitchStabilizer = new PitchStabilizer();
@@ -1604,6 +1618,10 @@ function bindSpatialControls(sourceId, panel) {
 }
 
 document.getElementById('open-display').addEventListener('click', () => window.horizon.moveToDisplay(Number(displayPicker.value)));
+shellThemePicker.addEventListener('change', () => {
+  const theme = applyShellTheme(shellThemePicker.value);
+  trackingState.textContent = `${shellThemePicker.selectedOptions[0]?.textContent || theme} shell theme active`;
+});
 document.getElementById('add-window').addEventListener('click', () => {
   const source = availableWindows.find((item) => item.id === windowPicker.value);
   captureWindow(source);
