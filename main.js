@@ -307,6 +307,8 @@ app.whenReady().then(() => {
   chatRunner = new ChatRunner({
     homeDirectory: app.getPath('home'),
     workingDirectory: __dirname,
+    getContext: () => handleControlRequest('list_apps'),
+    executeAction: handleControlRequest,
     onEvent: (event) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:event', event);
     }

@@ -113,6 +113,7 @@ button:hover { border-color: rgba(115, 230, 255, .7); background: rgba(16, 49, 6
 .captured-window.input-active::before { opacity: 1; filter: drop-shadow(0 0 6px rgba(84, 221, 255, .65)); }
 .captured-window.ax-event::before { animation: ax-frame-pulse .65s ease-out; }
 .captured-window::after { content: ""; position: absolute; z-index: 7; pointer-events: none; left: 0; right: 0; top: -18%; height: 12%; background: linear-gradient(180deg, transparent, rgba(97, 226, 255, .18), transparent); animation: holo-scan 5s linear infinite; }
+.captured-window:not(.fx-enabled)::after, .captured-window:not(.fx-enabled) .capture-overlay { display: none; }
 .captured-window header { margin: 0; padding: 0 14px 0 20px; cursor: grab; user-select: none; touch-action: none; border-bottom: 1px solid rgba(103, 221, 255, .22); background: linear-gradient(90deg, rgba(7, 28, 42, .98), rgba(3, 15, 25, .94)); }
 .captured-window.positioning header { cursor: grabbing; }
 .capture-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -137,6 +138,7 @@ button:hover { border-color: rgba(115, 230, 255, .7); background: rgba(16, 49, 6
 .capture-viewport video, .capture-placeholder { width: 100%; height: 100%; object-fit: contain; display: block; filter: saturate(.78) contrast(1.12) brightness(.86) hue-rotate(4deg); }
 .capture-placeholder { object-fit: cover; opacity: .72; filter: saturate(.62) contrast(1.14) brightness(.55) hue-rotate(8deg); }
 .capture-viewport::before { content: ""; position: absolute; z-index: 2; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(111, 228, 255, .025) 0 1px, transparent 1px 4px), linear-gradient(90deg, rgba(30, 187, 239, .08), transparent 12%, transparent 88%, rgba(30, 187, 239, .08)); mix-blend-mode: screen; }
+.captured-window.profile-themed .capture-viewport::before { background: none; }
 .capture-viewport::after { content: ""; position: absolute; z-index: 3; inset: 0; pointer-events: none; border: 1px solid rgba(132, 233, 255, .13); box-shadow: inset 0 0 45px rgba(50, 200, 255, .08); }
 .capture-overlay { position: absolute; z-index: 5; inset: 0; pointer-events: none; }
 .capture-overlay i { position: absolute; width: 28px; height: 28px; border-color: rgba(112, 232, 255, .82); }

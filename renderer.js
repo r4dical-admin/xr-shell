@@ -343,6 +343,7 @@ function setVisualMode(panel, requestedMode, persist = true) {
   const mode = requestedMode === 'theme' && !panel.xrTheme ? 'fx' : ['theme', 'fx', 'pass'].includes(requestedMode) ? requestedMode : 'fx';
   panel.visualMode = mode;
   panel.classList.toggle('profile-themed', mode === 'theme');
+  panel.classList.toggle('fx-enabled', mode === 'fx');
   panel.classList.toggle('clean', mode === 'pass');
   const button = panel.querySelector('[data-visual-mode]');
   button.dataset.mode = mode;
@@ -1458,7 +1459,7 @@ function renderChat(session) {
   const messages = session?.messages || [];
   if (!messages.length) {
     const message = document.createElement('p');
-    message.textContent = 'Start a read-only Codex session from the command deck.';
+    message.textContent = 'Ask Codex to arrange apps, create spatial notes, or help with your XR workspace.';
     chatResponse.append(message);
     return;
   }
