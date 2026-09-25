@@ -1,6 +1,6 @@
 # XR Shell
 
-A native Electron proof of concept for a panoramic workspace that is wider than the physical XREAL display. The physical display acts as a viewport into a 2–5× virtual canvas. XREAL One Pro head rotation pans the canvas; right-button dragging and arrow keys provide a hardware-free simulator.
+A native Electron proof of concept for a panoramic workspace that is wider than the physical XREAL display. The physical display acts as a viewport into a virtual canvas up to 7× the display width. XREAL One Pro head rotation pans the canvas; right-button dragging and arrow keys provide a hardware-free simulator.
 
 Open macOS windows can be brought into the workspace as live, interactive surfaces. Choose a window in the top toolbar and select **Add app**. macOS requests Screen Recording permission the first time. The mirror receives futuristic spatial chrome, depth, scan lines, color treatment and glow without modifying the original application bundle.
 
@@ -71,7 +71,7 @@ For live tracking, connect the One Pro directly over USB-C, enable Ethernet in i
 
 - 1.5–3.5× panoramic virtual canvas with a live minimap; 2.25× is the calmer default.
 - XREAL display discovery and fullscreen placement.
-- Live capture of up to three existing macOS application windows.
+- Live capture of up to twelve existing macOS application windows, with automatic canvas expansion and source-size-aware wrappers.
 - Native pointer, drag, scroll, text, shortcut and navigation-key forwarding to captured windows.
 - Direct spatial repositioning and constrained resizing for every captured surface.
 - A shared, draggable Accessibility-backed macOS application menu for the frontmost captured app.

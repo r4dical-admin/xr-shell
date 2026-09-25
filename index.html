@@ -105,7 +105,7 @@
         <button id="recenter">Recenter</button>
         <button id="enable-input">Enable app input</button>
       </div>
-      <label>Canvas width <output id="scale-output">2.25×</output><input id="scale" type="range" min="1.5" max="3.5" value="2.25" step="0.25" /></label>
+      <label>Canvas width <output id="scale-output">2.25×</output><input id="scale" type="range" min="1.5" max="7" value="2.25" step="0.25" /></label>
       <label>Canvas height <output id="height-scale-output">1.00×</output><input id="height-scale" type="range" min="1" max="2.5" value="1" step="0.25" /></label>
       <div class="minimap" aria-label="Workspace position"><div id="minimap-view"></div></div>
       <span class="hint">Right-drag or use ← → to simulate head movement</span>
@@ -134,6 +134,7 @@
       <div id="widget-library-list" class="widget-library-list"></div>
     </dialog>
     <script src="a2ui-runtime.js"></script>
+    <script src="window-layout.js"></script>
     <script src="renderer.js"></script>
   </body>
 </html>

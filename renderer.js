@@ -187,8 +187,8 @@ async function captureWindow(source, profileName = source?.name) {
     bringCaptureToFront(source.id, capturedWindows.get(source.id).panel);
     return capturedWindows.get(source.id);
   }
-  if (capturedWindows.size >= 3) {
-    trackingState.textContent = 'POC limit reached · remove a window before adding another';
+  if (capturedWindows.size >= window.XR_WINDOW_LAYOUT.MAX_WINDOWS) {
+    trackingState.textContent = `Workspace limit reached · release an app before adding more than ${window.XR_WINDOW_LAYOUT.MAX_WINDOWS}`;
     return;
   }
 
@@ -244,7 +244,14 @@ async function captureWindow(source, profileName = source?.name) {
     captureViewport.querySelector('.capture-placeholder, .capture-empty')?.remove();
     captureViewport.prepend(video);
     capturedWindows.get(source.id).stream = stream;
+    const fitToSource = () => {
+      if (panel.dataset.manualSize === 'true' || !video.videoWidth || !video.videoHeight) return;
+      const size = window.XR_WINDOW_LAYOUT.fittedPanelSize(video.videoWidth, video.videoHeight, appStage.clientWidth, appStage.clientHeight);
+      setPanelSize(panel, size.width, size.height);
+    };
+    video.addEventListener('resize', fitToSource);
     await video.play();
+    fitToSource();
   } catch (error) {
     const permission = await window.horizon.capturePermission();
     trackingState.textContent = permission === 'denied'
@@ -1079,7 +1086,9 @@ function centerWorkspace() {
 
 function layoutCapturedWindows() {
   const items = [...capturedWindows.values()];
-  const positions = items.length === 1 ? [0] : items.length === 2 ? [-43, 43] : [-66, 0, 66];
+  const requiredScale = window.XR_WINDOW_LAYOUT.requiredHorizontalScale(items.length, virtualScale);
+  if (requiredScale > virtualScale) setHorizontalScale(requiredScale);
+  const positions = window.XR_WINDOW_LAYOUT.horizontalSlots(items.length, virtualScale);
   items.forEach((item, index) => {
     const position = positions[index];
     item.panel.dataset.slot = String(index);
@@ -1143,7 +1152,7 @@ async function handleAgentControl(method, params = {}) {
     return { ...transformed, launched: launched.launched, profileApplied: transformed.profileApplied };
   }
   if (method === 'open_layout') {
-    if (!Array.isArray(params.apps) || !params.apps.length || params.apps.length > 3) throw new Error('A layout requires 1–3 apps');
+    if (!Array.isArray(params.apps) || !params.apps.length || params.apps.length > window.XR_WINDOW_LAYOUT.MAX_WINDOWS) throw new Error(`A layout requires 1–${window.XR_WINDOW_LAYOUT.MAX_WINDOWS} apps`);
     const opened = [];
     const failures = [];
     for (const spec of params.apps) {
@@ -1196,6 +1205,7 @@ async function handleAgentControl(method, params = {}) {
   }
   if (method === 'transform_app') {
     if (Number.isFinite(params.width) || Number.isFinite(params.height)) {
+      captured.panel.dataset.manualSize = 'true';
       setPanelSize(captured.panel, Number.isFinite(params.width) ? params.width : captured.panel.offsetWidth, Number.isFinite(params.height) ? params.height : captured.panel.offsetHeight);
     }
     if (Number.isFinite(params.x)) {
@@ -1495,8 +1505,8 @@ function clamp(value, minimum, maximum) {
 function setPanelSize(panel, width, height) {
   const maxWidth = Math.min(1100, appStage.clientWidth * 0.48);
   const maxHeight = appStage.clientHeight * 0.9;
-  panel.style.setProperty('--panel-width', `${clamp(width, 360, maxWidth)}px`);
-  panel.style.setProperty('--panel-height', `${clamp(height, 260, maxHeight)}px`);
+  panel.style.setProperty('--panel-width', `${clamp(width, 420, maxWidth)}px`);
+  panel.style.setProperty('--panel-height', `${clamp(height, 280, maxHeight)}px`);
 }
 
 function bindSpatialControls(sourceId, panel) {
@@ -1534,6 +1544,7 @@ function bindSpatialControls(sourceId, panel) {
     const dx = event.clientX - gesture.startX;
     const dy = event.clientY - gesture.startY;
     if (gesture.mode === 'resize') {
+      panel.dataset.manualSize = 'true';
       setPanelSize(panel, gesture.width + dx, gesture.height + dy);
       return;
     }
@@ -1580,10 +1591,12 @@ function bindSpatialControls(sourceId, panel) {
   };
 
   panel.querySelector('[data-smaller]').addEventListener('click', () => {
+    panel.dataset.manualSize = 'true';
     const rect = panel.getBoundingClientRect();
     setPanelSize(panel, rect.width * 0.88, rect.height * 0.88);
   });
   panel.querySelector('[data-larger]').addEventListener('click', () => {
+    panel.dataset.manualSize = 'true';
     const rect = panel.getBoundingClientRect();
     setPanelSize(panel, rect.width * 1.12, rect.height * 1.12);
   });
@@ -1649,12 +1662,16 @@ enableInputButton.addEventListener('click', async () => {
     }
   }, 120000);
 });
-scaleInput.addEventListener('input', () => {
-  virtualScale = Number(scaleInput.value);
+function setHorizontalScale(value) {
+  virtualScale = clamp(Number(value) || 2.25, Number(scaleInput.min), Number(scaleInput.max));
+  scaleInput.value = String(virtualScale);
   workspace.style.width = `${virtualScale * 100}vw`;
   scaleOutput.value = `${virtualScale.toFixed(2).replace(/0$/, '')}×`;
   canvasReadout.textContent = `${virtualScale.toFixed(2).replace(/0$/, '')}× width · ${virtualHeightScale.toFixed(2).replace(/0$/, '')}× height`;
   minimapView.style.width = `${100 / virtualScale}%`;
+}
+scaleInput.addEventListener('input', () => {
+  setHorizontalScale(scaleInput.value);
 });
 heightScaleInput.addEventListener('input', () => {
   virtualHeightScale = Number(heightScaleInput.value);
