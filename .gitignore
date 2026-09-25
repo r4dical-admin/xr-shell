@@ -2,5 +2,8 @@ node_modules/
 .build/
 .DS_Store
 artifacts/
+!artifacts/
+artifacts/*
+!artifacts/xr-shell-demo.mp4
 integration-profiles/
 *.log
