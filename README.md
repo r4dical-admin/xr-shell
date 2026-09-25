@@ -6,7 +6,9 @@ A native Electron proof of concept for a panoramic workspace that is wider than 
 
 [![Watch the XR Shell demo](assets/backgrounds/horizon.jpg)](artifacts/xr-shell-demo.mp4)
 
-**[Watch or download the 24-second XR Shell demo →](artifacts/xr-shell-demo.mp4)**
+**[Watch or download the 42-second XR Shell feature demo →](artifacts/xr-shell-demo.mp4)**
+
+The walkthrough highlights the panoramic head-tracked canvas, live macOS window capture, native input and spatial window controls, Accessibility-driven app theming, persistent A2UI widgets, Codex and local MCP control, the shared application menu, and all five shell themes.
 
 Open macOS windows can be brought into the workspace as live, interactive surfaces. Choose a window in the top toolbar and select **Add app**. macOS requests Screen Recording permission the first time. The mirror receives futuristic spatial chrome, depth, scan lines, color treatment and glow without modifying the original application bundle.
 
