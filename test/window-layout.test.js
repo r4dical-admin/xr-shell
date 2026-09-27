@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { MAX_HORIZONTAL_SCALE, fittedPanelSize, horizontalSlots, requiredHorizontalScale } = require('../window-layout');
+const { MAX_HORIZONTAL_SCALE, containedMediaRect, fittedPanelSize, horizontalSlots, requiredHorizontalScale } = require('../window-layout');
 
 test('captured wrappers preserve the source dimensions while fitting the XR stage', () => {
   assert.deepEqual(fittedPanelSize(800, 600, 3000, 1000), { width: 800, height: 694 });
@@ -10,6 +10,13 @@ test('captured wrappers preserve the source dimensions while fitting the XR stag
   assert.ok(large.width <= 1100);
   assert.ok(large.height <= 900);
   assert.ok(Math.abs((large.height - 94) / large.width - 1200 / 2000) < 0.001);
+});
+
+test('large native title regions can be cropped without distorting media geometry', () => {
+  assert.deepEqual(fittedPanelSize(800, 700, 3000, 1000, 80), { width: 800, height: 714 });
+  const rect = containedMediaRect(800, 700, 800, 620, 80);
+  assert.deepEqual(rect, { left: 0, top: -80, width: 800, height: 700, scale: 1, cropTop: 80 });
+  assert.equal((0 - rect.top) / rect.height, 80 / 700);
 });
 
 test('more captured apps expand the reachable canvas up to seven times', () => {

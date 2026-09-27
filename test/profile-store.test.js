@@ -69,3 +69,23 @@ test('profile library can inspect and clear recordings without deleting the them
   assert.equal(store.delete(summary.bundleId), true);
   assert.deepEqual(store.list(), []);
 });
+
+test('regenerating a reskin replaces only the theme and preserves its AX recording', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'xr-shell-profiles-'));
+  const store = new ProfileStore(directory);
+  store.save(base, [{ type: 'AXPressed', role: 'AXButton', at: 1000 }]);
+  const replacement = {
+    version: 2,
+    name: 'Editor regenerated',
+    motif: 'terminal',
+    palette: { surface: '#031019', ink: '#e8fbff', accent: '#37e7ff', secondary: '#9b7cff', line: '#57dfff' },
+    videoFilter: 'saturate(1.1) contrast(1.12) brightness(.9)',
+    roleEffects: { AXButton: 'holographic-control' }
+  };
+  store.installTheme(base.app.bundleId, replacement);
+  const profile = store.details(base.app.bundleId);
+  assert.deepEqual(profile.xrTheme, replacement);
+  assert.equal(profile.latestLayout.length, 1);
+  assert.equal(profile.eventPatterns.total, 1);
+  assert.equal(store.list()[0].hasRecording, true);
+});

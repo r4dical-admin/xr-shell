@@ -23,18 +23,38 @@
     return Array.from({ length: count }, (_value, index) => (index - (count - 1) / 2) * spacing);
   }
 
-  function fittedPanelSize(mediaWidth, mediaHeight, stageWidth, stageHeight) {
+  function fittedPanelSize(mediaWidth, mediaHeight, stageWidth, stageHeight, cropTop = 0) {
     const sourceWidth = Math.max(1, Number(mediaWidth) || 1);
     const sourceHeight = Math.max(1, Number(mediaHeight) || 1);
+    const safeCropTop = Math.min(sourceHeight * 0.3, Math.max(0, Number(cropTop) || 0));
+    const visibleHeight = Math.max(1, sourceHeight - safeCropTop);
     const maxWidth = Math.max(420, Math.min(1100, Number(stageWidth) * 0.48));
     const maxHeight = Math.max(280, Number(stageHeight) * 0.9);
     const maxContentHeight = Math.max(1, maxHeight - CHROME_HEIGHT);
-    const scale = Math.min(1, maxWidth / sourceWidth, maxContentHeight / sourceHeight);
+    const scale = Math.min(1, maxWidth / sourceWidth, maxContentHeight / visibleHeight);
     return {
       width: Math.max(420, sourceWidth * scale),
-      height: Math.max(280, sourceHeight * scale + CHROME_HEIGHT)
+      height: Math.max(280, visibleHeight * scale + CHROME_HEIGHT)
     };
   }
 
-  return { MAX_WINDOWS, MAX_HORIZONTAL_SCALE, CHROME_HEIGHT, requiredHorizontalScale, horizontalSlots, fittedPanelSize };
+  function containedMediaRect(mediaWidth, mediaHeight, boxWidth, boxHeight, cropTop = 0) {
+    const sourceWidth = Math.max(1, Number(mediaWidth) || 1);
+    const sourceHeight = Math.max(1, Number(mediaHeight) || 1);
+    const safeCropTop = Math.min(sourceHeight * 0.3, Math.max(0, Number(cropTop) || 0));
+    const visibleHeight = Math.max(1, sourceHeight - safeCropTop);
+    const scale = Math.min(Math.max(1, Number(boxWidth)) / sourceWidth, Math.max(1, Number(boxHeight)) / visibleHeight);
+    const width = sourceWidth * scale;
+    const height = sourceHeight * scale;
+    return {
+      left: (Number(boxWidth) - width) / 2,
+      top: (Number(boxHeight) - visibleHeight * scale) / 2 - safeCropTop * scale,
+      width,
+      height,
+      scale,
+      cropTop: safeCropTop
+    };
+  }
+
+  return { MAX_WINDOWS, MAX_HORIZONTAL_SCALE, CHROME_HEIGHT, containedMediaRect, requiredHorizontalScale, horizontalSlots, fittedPanelSize };
 });

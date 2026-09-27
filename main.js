@@ -11,6 +11,7 @@ const { ProfileStore, diffSnapshots } = require('./profile-store');
 const { ProfileObserver } = require('./profile-observer');
 const { ChatRunner, parseBackend } = require('./chat-runner');
 const { ThemeAgent } = require('./theme-agent');
+const { compileTheme } = require('./theme-engine');
 
 let mainWindow;
 let chatRunner;
@@ -18,7 +19,7 @@ let themeAgent;
 let controlServer;
 let controlSequence = 0;
 const controlPending = new Map();
-const PROFILE_DURATION_MS = Math.max(10000, Number(process.env.XR_PROFILE_DURATION_MS) || 5 * 60 * 1000);
+const PROFILE_DURATION_MS = Math.max(10000, Number(process.env.XR_PROFILE_DURATION_MS) || 60 * 1000);
 const inputBridge = new InputBridge();
 const profileStore = new ProfileStore(path.join(__dirname, 'integration-profiles'));
 const profilers = new Map();
@@ -344,10 +345,22 @@ app.whenReady().then(() => {
   ipcMain.handle('profile:theme-for-app', (_event, appName) => profileStore.themeForAppName(String(appName || '').slice(0, 300)));
   ipcMain.handle('profile:list', () => profileStore.list());
   ipcMain.handle('profile:details', (_event, bundleId, kind) => profileStore.details(String(bundleId || '').slice(0, 300), kind === 'recording' ? 'recording' : 'profile'));
-  ipcMain.handle('profile:delete', (_event, bundleId) => {
+  ipcMain.handle('profile:regenerate', async (_event, bundleId) => {
     const safeBundleId = String(bundleId || '').slice(0, 300);
     stopProfilersForBundleId(safeBundleId);
-    return { ok: profileStore.delete(safeBundleId) };
+    const profile = profileStore.details(safeBundleId, 'profile');
+    if (!profile) return { ok: false, error: 'profile-not-found' };
+    const hasRecording = Boolean((profile.latestLayout || []).length || Number(profile.eventPatterns?.total));
+    if (!hasRecording) return { ok: false, error: 'recording-required' };
+    try {
+      const theme = await themeAgent.generate(profile);
+      profileStore.installTheme(safeBundleId, theme);
+      return { ok: true, theme, app: profile.app, fallback: false };
+    } catch (error) {
+      const theme = compileTheme(profile);
+      profileStore.installTheme(safeBundleId, theme);
+      return { ok: true, theme, app: profile.app, fallback: true, warning: error.message };
+    }
   });
   ipcMain.handle('profile:recording-delete', (_event, bundleId) => {
     const safeBundleId = String(bundleId || '').slice(0, 300);
@@ -368,6 +381,10 @@ app.whenReady().then(() => {
     ? systemPreferences.getMediaAccessStatus('screen')
     : 'granted');
   ipcMain.handle('window:list', () => availableApplicationWindows(true));
+  ipcMain.handle('window:metrics', (_event, sourceId) => {
+    const windowId = sourceWindowId(sourceId);
+    return windowId === null ? { ok: false, error: 'invalid-window-source' } : inputBridge.request({ type: 'window-metrics', windowId });
+  });
   ipcMain.on('control:response', (_event, response) => {
     const pending = controlPending.get(response?.id);
     if (!pending) return;

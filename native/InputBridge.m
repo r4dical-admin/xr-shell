@@ -147,12 +147,7 @@ static void CollectElements(AXUIElementRef element, CGRect bounds, NSString *pat
     }
 }
 
-static NSDictionary *AccessibilitySnapshot(uint32_t windowID) {
-    pid_t pid = 0;
-    CGRect bounds;
-    if (!WindowDetails(windowID, &pid, &bounds)) return @{@"ok": @NO, @"error": @"source-window-unavailable"};
-    AXUIElementRef application = AXUIElementCreateApplication(pid);
-    AXUIElementSetMessagingTimeout(application, 0.8);
+static AXUIElementRef BestAccessibilityWindow(AXUIElementRef application, CGRect bounds) {
     id windowObject = CopyAttribute(application, kAXWindowsAttribute);
     NSArray *windows = [windowObject isKindOfClass:NSArray.class] ? windowObject : @[];
     AXUIElementRef bestWindow = NULL;
@@ -167,6 +162,78 @@ static NSDictionary *AccessibilitySnapshot(uint32_t windowID) {
             + fabs(CGRectGetHeight(candidateFrame) - CGRectGetHeight(bounds));
         if (score < bestScore) { bestScore = score; bestWindow = candidate; }
     }
+    if (bestWindow) CFRetain(bestWindow);
+    return bestWindow;
+}
+
+static void FindTerminalContentTop(AXUIElementRef element, CGRect bounds, NSUInteger depth,
+                                   double *bestScore, double *bestTop) {
+    if (depth > 7) return;
+    CGRect frame;
+    NSString *role = CleanString(CopyAttribute(element, kAXRoleAttribute), 80) ?: @"";
+    if (ElementFrame(element, &frame)) {
+        double windowWidth = MAX(1.0, CGRectGetWidth(bounds));
+        double windowHeight = MAX(1.0, CGRectGetHeight(bounds));
+        double top = CGRectGetMinY(frame) - CGRectGetMinY(bounds);
+        double widthRatio = CGRectGetWidth(frame) / windowWidth;
+        double heightRatio = CGRectGetHeight(frame) / windowHeight;
+        BOOL contentRole = [role isEqualToString:(__bridge NSString *)kAXScrollAreaRole]
+            || [role isEqualToString:(__bridge NSString *)kAXTextAreaRole]
+            || [role isEqualToString:(__bridge NSString *)kAXGroupRole]
+            || [role isEqualToString:@"AXSplitGroup"];
+        if (contentRole && top >= 24.0 && top <= MIN(180.0, windowHeight * 0.3)
+            && widthRatio >= 0.65 && heightRatio >= 0.35) {
+            double score = CGRectGetWidth(frame) * CGRectGetHeight(frame)
+                + ([role isEqualToString:(__bridge NSString *)kAXScrollAreaRole] ? windowWidth * windowHeight : 0);
+            if (score > *bestScore) { *bestScore = score; *bestTop = top; }
+        }
+    }
+    id childObject = CopyAttribute(element, kAXChildrenAttribute);
+    if (![childObject isKindOfClass:NSArray.class]) return;
+    NSArray *children = childObject;
+    NSUInteger count = MIN(children.count, 100);
+    for (NSUInteger index = 0; index < count; index++) {
+        FindTerminalContentTop((__bridge AXUIElementRef)children[index], bounds, depth + 1, bestScore, bestTop);
+    }
+}
+
+static NSDictionary *WindowMetrics(uint32_t windowID) {
+    pid_t pid = 0;
+    CGRect bounds;
+    if (!WindowDetails(windowID, &pid, &bounds)) return @{ @"ok": @NO, @"error": @"source-window-unavailable" };
+    NSRunningApplication *running = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    NSString *name = running.localizedName ?: @"Unknown App";
+    NSString *bundleID = running.bundleIdentifier ?: [NSString stringWithFormat:@"pid.%d", pid];
+    NSString *identity = [[NSString stringWithFormat:@"%@ %@", name, bundleID] lowercaseString];
+    BOOL terminalLike = [identity containsString:@"terminal"] || [identity containsString:@"iterm"] || [identity containsString:@"warp"];
+    double cropTop = 0;
+    if (terminalLike) {
+        AXUIElementRef application = AXUIElementCreateApplication(pid);
+        AXUIElementSetMessagingTimeout(application, 0.8);
+        AXUIElementRef window = BestAccessibilityWindow(application, bounds);
+        if (window) {
+            double bestScore = 0;
+            FindTerminalContentTop(window, bounds, 0, &bestScore, &cropTop);
+            CFRelease(window);
+        }
+        CFRelease(application);
+    }
+    cropTop = MIN(MAX(0.0, cropTop), CGRectGetHeight(bounds) * 0.3);
+    return @{
+        @"ok": @YES,
+        @"app": @{ @"pid": @(pid), @"name": name, @"bundleId": bundleID },
+        @"window": @{ @"id": @(windowID), @"width": @(CGRectGetWidth(bounds)), @"height": @(CGRectGetHeight(bounds)) },
+        @"recommendedCropTop": @(round(cropTop))
+    };
+}
+
+static NSDictionary *AccessibilitySnapshot(uint32_t windowID) {
+    pid_t pid = 0;
+    CGRect bounds;
+    if (!WindowDetails(windowID, &pid, &bounds)) return @{@"ok": @NO, @"error": @"source-window-unavailable"};
+    AXUIElementRef application = AXUIElementCreateApplication(pid);
+    AXUIElementSetMessagingTimeout(application, 0.8);
+    AXUIElementRef bestWindow = BestAccessibilityWindow(application, bounds);
     if (!bestWindow) {
         CFRelease(application);
         return @{@"ok": @NO, @"error": @"accessibility-window-unavailable"};
@@ -191,6 +258,7 @@ static NSDictionary *AccessibilitySnapshot(uint32_t windowID) {
         @"elements": elements,
         @"capturedAt": @([[NSDate date] timeIntervalSince1970] * 1000.0)
     };
+    CFRelease(bestWindow);
     CFRelease(application);
     return snapshot;
 }
@@ -599,6 +667,12 @@ int main(int argc, const char *argv[]) {
                     NSMutableDictionary *snapshot = [AccessibilitySnapshot([command[@"windowId"] unsignedIntValue]) mutableCopy];
                     snapshot[@"id"] = requestID;
                     Emit(snapshot);
+                    continue;
+                }
+                if ([type isEqualToString:@"window-metrics"]) {
+                    NSMutableDictionary *metrics = [WindowMetrics([command[@"windowId"] unsignedIntValue]) mutableCopy];
+                    metrics[@"id"] = requestID;
+                    Emit(metrics);
                     continue;
                 }
                 if ([type isEqualToString:@"menu-snapshot"]) {

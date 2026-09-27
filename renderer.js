@@ -218,7 +218,7 @@ async function captureWindow(source, profileName = source?.name) {
     <div class="capture-viewport">${source.thumbnail ? `<img class="capture-placeholder" src="${source.thumbnail}" alt="Preview of ${escapeHtml(source.name)}" />` : '<div class="capture-empty"><strong>SCREEN RECORDING REQUIRED</strong>Allow access in Privacy & Security, then add this window again.</div>'}<div class="semantic-layer" aria-hidden="true"></div><div class="xr-cursor" aria-hidden="true"><i></i></div><div class="capture-overlay"><i></i><i></i><i></i><i></i><span>OPTICAL FEED · SECURE</span></div></div>
     <footer><span>30 FPS · GLASS-02 · MIRRORED SURFACE</span><b>DRAG CORNER TO RESIZE</b></footer><div class="resize-grip" title="Drag to resize" aria-hidden="true"></div>`;
   appStage.append(panel);
-  const captured = { source, panel, stream: null, profiling: false, profileEndsAt: 0, theme: null, spatialCleanup: null };
+  const captured = { source, panel, stream: null, profiling: false, profileEndsAt: 0, theme: null, spatialCleanup: null, mediaCropTop: 0, bundleId: null, profileSnapshot: null, profileEvents: [] };
   capturedWindows.set(source.id, captured);
   setVisualMode(panel, 'fx', false);
   try {
@@ -264,13 +264,28 @@ async function captureWindow(source, profileName = source?.name) {
     captureViewport.prepend(video);
     capturedWindows.get(source.id).stream = stream;
     const fitToSource = () => {
-      if (panel.dataset.manualSize === 'true' || !video.videoWidth || !video.videoHeight) return;
-      const size = window.XR_WINDOW_LAYOUT.fittedPanelSize(video.videoWidth, video.videoHeight, appStage.clientWidth, appStage.clientHeight);
-      setPanelSize(panel, size.width, size.height);
+      if (!video.videoWidth || !video.videoHeight) return;
+      const record = capturedWindows.get(source.id);
+      if (!record) return;
+      if (panel.dataset.manualSize !== 'true') {
+        const size = window.XR_WINDOW_LAYOUT.fittedPanelSize(video.videoWidth, video.videoHeight, appStage.clientWidth, appStage.clientHeight, record.mediaCropTop);
+        setPanelSize(panel, size.width, size.height);
+      }
+      requestAnimationFrame(() => {
+        layoutCapturedMedia(panel, video, record.mediaCropTop);
+        syncSemanticGeometry(panel);
+      });
     };
     video.addEventListener('resize', fitToSource);
     await video.play();
     fitToSource();
+    window.horizon.windowMetrics(source.id).then((metrics) => {
+      const record = capturedWindows.get(source.id);
+      if (!record || !metrics?.ok) return;
+      record.bundleId = metrics.app?.bundleId || null;
+      record.mediaCropTop = clamp(Number(metrics.recommendedCropTop) || 0, 0, video.videoHeight * .3);
+      fitToSource();
+    }).catch(() => {});
   } catch (error) {
     const permission = await window.horizon.capturePermission();
     trackingState.textContent = permission === 'denied'
@@ -326,8 +341,8 @@ function readThemePreference(theme) {
   try {
     const saved = JSON.parse(localStorage.getItem(themePreferenceKey(theme)) || '{}');
     const mode = ['theme', 'fx', 'pass'].includes(saved.mode) ? saved.mode : saved.enabled === false ? 'fx' : 'theme';
-    return { intensity: clamp(Number(saved.intensity) || 60, 15, 100), mode };
-  } catch { return { intensity: 60, mode: 'theme' }; }
+    return { intensity: clamp(Number(saved.intensity) || 72, 15, 100), mode };
+  } catch { return { intensity: 72, mode: 'theme' }; }
 }
 
 function saveThemePreference(panel) {
@@ -362,6 +377,7 @@ function setVisualMode(panel, requestedMode, persist = true) {
   const mode = requestedMode === 'theme' && !panel.xrTheme ? 'fx' : ['theme', 'fx', 'pass'].includes(requestedMode) ? requestedMode : 'fx';
   panel.visualMode = mode;
   panel.classList.toggle('profile-themed', mode === 'theme');
+  panel.classList.toggle('theme-semantic', mode === 'theme');
   panel.classList.toggle('fx-enabled', mode === 'fx');
   panel.classList.toggle('clean', mode === 'pass');
   const button = panel.querySelector('[data-visual-mode]');
@@ -411,15 +427,15 @@ async function showProfileDetails(bundleId, kind) {
   profileLibraryDetail.textContent = detail ? JSON.stringify(detail, null, 2) : 'This item no longer exists.';
 }
 
-function removeDeletedProfileTheme(appName) {
+function applyRegeneratedProfileTheme(bundleId, appName, theme, profile) {
   for (const captured of capturedWindows.values()) {
     const title = captured.panel.querySelector('.capture-title span')?.textContent || '';
-    if (!title.toLowerCase().includes(String(appName).toLowerCase())) continue;
-    setVisualMode(captured.panel, 'fx', false);
-    captured.panel.xrTheme = null;
-    captured.panel.removeAttribute('data-motif');
-    captured.panel.querySelector('[data-visual-mode]').textContent = 'FX';
-    captured.panel.querySelector('[data-visual-mode]').title = 'Generic holographic FX · click for passthrough';
+    if (captured.bundleId !== bundleId && !title.toLowerCase().includes(String(appName).toLowerCase())) continue;
+    captured.theme = theme;
+    applyProfileTheme(captured.panel, theme);
+    const snapshot = captured.profileSnapshot || (profile?.latestLayout?.length ? { elements: profile.latestLayout } : null);
+    if (snapshot) renderSemanticLayer(captured.panel, snapshot, captured.profileEvents);
+    setVisualMode(captured.panel, 'theme');
   }
 }
 
@@ -454,29 +470,38 @@ async function renderProfileLibrary() {
     viewRecording.textContent = 'View recording';
     viewRecording.disabled = !profile.hasRecording;
     viewRecording.addEventListener('click', () => showProfileDetails(profile.bundleId, 'recording'));
-    const clearRecording = document.createElement('button');
-    clearRecording.type = 'button';
-    clearRecording.className = 'danger';
-    clearRecording.textContent = 'Clear recording';
-    clearRecording.disabled = !profile.hasRecording;
-    clearRecording.addEventListener('click', async () => {
-      if (!confirm(`Clear learned AX layout and event data for ${profile.name}? The generated profile and theme will remain.`)) return;
+    const deleteRecording = document.createElement('button');
+    deleteRecording.type = 'button';
+    deleteRecording.className = 'danger';
+    deleteRecording.textContent = 'Delete recording';
+    deleteRecording.disabled = !profile.hasRecording;
+    deleteRecording.addEventListener('click', async () => {
+      if (!confirm(`Delete learned AX layout and event data for ${profile.name}? The generated reskin will remain.`)) return;
       await window.horizon.deleteRecording(profile.bundleId);
       profileLibraryDetail.textContent = `${profile.name} recording data cleared. Its profile and theme were preserved.`;
       await renderProfileLibrary();
     });
-    const deleteProfile = document.createElement('button');
-    deleteProfile.type = 'button';
-    deleteProfile.className = 'danger';
-    deleteProfile.textContent = 'Delete profile';
-    deleteProfile.addEventListener('click', async () => {
-      if (!confirm(`Delete the complete ${profile.name} integration profile and generated theme?`)) return;
-      await window.horizon.deleteProfile(profile.bundleId);
-      removeDeletedProfileTheme(profile.name);
-      profileLibraryDetail.textContent = `${profile.name} profile deleted.`;
+    const regenerateProfile = document.createElement('button');
+    regenerateProfile.type = 'button';
+    regenerateProfile.textContent = 'Regenerate reskin';
+    regenerateProfile.disabled = !profile.hasRecording;
+    regenerateProfile.addEventListener('click', async () => {
+      regenerateProfile.disabled = true;
+      regenerateProfile.textContent = 'Regenerating…';
+      profileLibraryDetail.textContent = `Regenerating ${profile.name} from its saved AX recording…`;
+      const result = await window.horizon.regenerateProfile(profile.bundleId);
+      if (!result.ok) {
+        profileLibraryDetail.textContent = `Could not regenerate ${profile.name}: ${result.error}`;
+        regenerateProfile.disabled = false;
+        regenerateProfile.textContent = 'Regenerate reskin';
+        return;
+      }
+      const regenerated = await window.horizon.profileDetails(profile.bundleId, 'profile');
+      applyRegeneratedProfileTheme(profile.bundleId, profile.name, result.theme, regenerated);
+      profileLibraryDetail.textContent = `${profile.name} reskin regenerated${result.fallback ? ' with the local adaptive compiler' : ' from its AX profile'}. The recording was preserved.`;
       await renderProfileLibrary();
     });
-    actions.append(viewProfile, viewRecording, clearRecording, deleteProfile);
+    actions.append(viewProfile, viewRecording, regenerateProfile, deleteRecording);
     card.append(header, summary, actions);
     profileLibraryList.append(card);
   }
@@ -1021,14 +1046,22 @@ function syncSemanticGeometry(panel) {
   const video = surface.querySelector('video');
   const layer = surface.querySelector('.semantic-layer');
   if (!video || !video.videoWidth || !video.videoHeight) return;
-  const rect = surface.getBoundingClientRect();
-  const scale = Math.min(rect.width / video.videoWidth, rect.height / video.videoHeight);
-  const width = video.videoWidth * scale;
-  const height = video.videoHeight * scale;
-  layer.style.left = `${(rect.width - width) / 2}px`;
-  layer.style.top = `${(rect.height - height) / 2}px`;
-  layer.style.width = `${width}px`;
-  layer.style.height = `${height}px`;
+  const rect = video.getBoundingClientRect();
+  const surfaceRect = surface.getBoundingClientRect();
+  layer.style.left = `${rect.left - surfaceRect.left}px`;
+  layer.style.top = `${rect.top - surfaceRect.top}px`;
+  layer.style.width = `${rect.width}px`;
+  layer.style.height = `${rect.height}px`;
+}
+
+function layoutCapturedMedia(panel, video, cropTop = 0) {
+  const surface = panel.querySelector('.capture-viewport');
+  if (!surface || !video?.videoWidth || !video.videoHeight) return;
+  const rect = window.XR_WINDOW_LAYOUT.containedMediaRect(video.videoWidth, video.videoHeight, surface.clientWidth, surface.clientHeight, cropTop);
+  video.style.left = `${rect.left}px`;
+  video.style.top = `${rect.top}px`;
+  video.style.width = `${rect.width}px`;
+  video.style.height = `${rect.height}px`;
 }
 
 function renderSemanticLayer(panel, snapshot, events = []) {
@@ -1042,7 +1075,8 @@ function renderSemanticLayer(panel, snapshot, events = []) {
     const frame = element.frame;
     if (!frame || frame.width > 1.05 || frame.height > 1.05) continue;
     const node = document.createElement('div');
-    node.className = `ax-element ax-${element.role.slice(2).toLowerCase()}${changed.has(element.id) ? ' changed' : ''}`;
+    const effect = String(panel.xrTheme?.roleEffects?.[element.role] || '').replace(/[^a-z0-9-]/g, '');
+    node.className = `ax-element ax-${element.role.slice(2).toLowerCase()}${effect ? ` effect-${effect}` : ''}${changed.has(element.id) ? ' changed' : ''}`;
     node.style.left = `${clamp(frame.x, 0, 1) * 100}%`;
     node.style.top = `${clamp(frame.y, 0, 1) * 100}%`;
     node.style.width = `${clamp(frame.width, 0.005, 1) * 100}%`;
@@ -1060,14 +1094,19 @@ function renderSemanticLayer(panel, snapshot, events = []) {
 
 function bindProfileControls(sourceId, panel) {
   const button = panel.querySelector('[data-profile]');
-  const resizeObserver = new ResizeObserver(() => syncSemanticGeometry(panel));
+  const resizeObserver = new ResizeObserver(() => {
+    const captured = capturedWindows.get(sourceId);
+    const video = panel.querySelector('video');
+    if (video && captured) layoutCapturedMedia(panel, video, captured.mediaCropTop);
+    syncSemanticGeometry(panel);
+  });
   resizeObserver.observe(panel);
   capturedWindows.get(sourceId).resizeObserver = resizeObserver;
   button.addEventListener('click', async () => {
     const captured = capturedWindows.get(sourceId);
     if (!captured) return;
     const enabled = !captured.profiling;
-    button.textContent = enabled ? '5:00' : 'AX';
+    button.textContent = enabled ? '1:00' : 'AX';
     const result = await window.horizon.toggleProfile(sourceId, enabled);
     if (!result.ok) {
       button.textContent = 'AX!';
@@ -1077,14 +1116,14 @@ function bindProfileControls(sourceId, panel) {
       return;
     }
     captured.profiling = enabled;
-    captured.profileEndsAt = enabled ? Number(result.endsAt) || Date.now() + 5 * 60 * 1000 : 0;
+    captured.profileEndsAt = enabled ? Number(result.endsAt) || Date.now() + 60 * 1000 : 0;
     button.classList.toggle('active', enabled);
-    button.textContent = enabled ? '5:00' : 'AX';
+    button.textContent = enabled ? '1:00' : 'AX';
     panel.querySelector('.semantic-layer').classList.toggle('visible', enabled);
     if (enabled) {
       applyProfileTheme(panel, result.theme);
       renderSemanticLayer(panel, result);
-      trackingState.textContent = `Learning ${result.app.name} for 5 minutes · use the app normally`;
+      trackingState.textContent = `Learning ${result.app.name} for 1 minute · use the app normally`;
     } else {
       panel.querySelector('footer b').textContent = 'DRAG CORNER TO RESIZE';
     }
@@ -1255,29 +1294,10 @@ function eventModifiers(event) {
 }
 
 function mediaPoint(event, video, clampOutside = false) {
-  const boxWidth = video.clientWidth;
-  const boxHeight = video.clientHeight;
-  const mediaWidth = video.videoWidth || boxWidth;
-  const mediaHeight = video.videoHeight || boxHeight;
-  if (!boxWidth || !boxHeight || !mediaWidth || !mediaHeight) return null;
-
-  const scale = Math.min(boxWidth / mediaWidth, boxHeight / mediaHeight);
-  const width = mediaWidth * scale;
-  const height = mediaHeight * scale;
-  const left = (boxWidth - width) / 2;
-  const top = (boxHeight - height) / 2;
-  let localX;
-  let localY;
-  if (event.target === video && Number.isFinite(event.offsetX) && Number.isFinite(event.offsetY)) {
-    localX = event.offsetX;
-    localY = event.offsetY;
-  } else {
-    const rect = video.getBoundingClientRect();
-    localX = (event.clientX - rect.left) * boxWidth / rect.width;
-    localY = (event.clientY - rect.top) * boxHeight / rect.height;
-  }
-  let x = (localX - left) / width;
-  let y = (localY - top) / height;
+  const rect = video.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  let x = (event.clientX - rect.left) / rect.width;
+  let y = (event.clientY - rect.top) / rect.height;
   if (!clampOutside && (x < 0 || x > 1 || y < 0 || y > 1)) return null;
   x = Math.max(0, Math.min(1, x));
   y = Math.max(0, Math.min(1, y));
@@ -1286,13 +1306,10 @@ function mediaPoint(event, video, clampOutside = false) {
 
 function updateXRCursor(surface, video, point, pressed = false) {
   const cursor = surface.querySelector('.xr-cursor');
-  const mediaWidth = video.videoWidth || video.clientWidth;
-  const mediaHeight = video.videoHeight || video.clientHeight;
-  const scale = Math.min(video.clientWidth / mediaWidth, video.clientHeight / mediaHeight);
-  const width = mediaWidth * scale;
-  const height = mediaHeight * scale;
-  cursor.style.left = `${(video.clientWidth - width) / 2 + point.x * width}px`;
-  cursor.style.top = `${(video.clientHeight - height) / 2 + point.y * height}px`;
+  const videoRect = video.getBoundingClientRect();
+  const surfaceRect = surface.getBoundingClientRect();
+  cursor.style.left = `${videoRect.left - surfaceRect.left + point.x * videoRect.width}px`;
+  cursor.style.top = `${videoRect.top - surfaceRect.top + point.y * videoRect.height}px`;
   cursor.classList.toggle('pressed', pressed);
   cursor.classList.add('visible');
 }
@@ -1813,6 +1830,8 @@ document.addEventListener('pointerdown', (event) => {
 window.horizon.onProfileUpdate(({ sourceId, snapshot, events, profilePath }) => {
   const captured = capturedWindows.get(sourceId);
   if (!captured?.profiling) return;
+  captured.profileSnapshot = snapshot;
+  captured.profileEvents = events;
   applyProfileTheme(captured.panel, snapshot.theme);
   renderSemanticLayer(captured.panel, snapshot, events);
   if (events.length) trackingState.textContent = `${snapshot.app.name} · learned ${events.length} UI event${events.length === 1 ? '' : 's'} · ${profilePath.split('/').pop()}`;
@@ -1830,7 +1849,7 @@ window.horizon.onProfileStatus(({ sourceId, stage, appName, endsAt, eventCount, 
   const button = captured.panel.querySelector('[data-profile]');
   if (stage === 'learning') {
     captured.profiling = true;
-    captured.profileEndsAt = Number(endsAt) || Date.now() + 5 * 60 * 1000;
+    captured.profileEndsAt = Number(endsAt) || Date.now() + 60 * 1000;
     button.classList.add('active');
     return;
   }
@@ -1845,9 +1864,10 @@ window.horizon.onProfileStatus(({ sourceId, stage, appName, endsAt, eventCount, 
   captured.profileEndsAt = 0;
   button.classList.remove('active');
   button.textContent = stage === 'complete' ? 'AX✓' : 'AX!';
-  captured.panel.querySelector('.semantic-layer').classList.remove('visible');
+  captured.panel.querySelector('.semantic-layer').classList.toggle('visible', captured.panel.visualMode === 'theme');
   if (stage === 'complete' && theme) {
     applyProfileTheme(captured.panel, theme);
+    if (captured.profileSnapshot) renderSemanticLayer(captured.panel, captured.profileSnapshot, captured.profileEvents);
     captured.panel.querySelector('footer b').textContent = `${eventCount || 0} AX EVENTS · ${fallback ? 'ADAPTIVE' : 'CODEX'} THEME`;
     trackingState.textContent = `${appName} XR theme installed${fallback ? ' using the local fallback' : ' by Codex'}`;
     requestAnimationFrame(() => showThemeIntensity(captured.panel, appName));
