@@ -231,8 +231,9 @@ async function captureWindow(source, profileName = source?.name) {
 
   const panel = document.createElement('article');
   panel.className = 'captured-window glass';
+  panel.dataset.sourceId = source.id;
   panel.innerHTML = `
-    <header title="Drag to move this window in the workspace"><div class="capture-title">${source.appIcon ? `<img src="${source.appIcon}" alt="" />` : '<i></i>'}<div><small>HOLOGRAPHIC WINDOW LINK · GRAB TO MOVE</small><span>${escapeHtml(source.name)}</span></div></div><div class="capture-actions"><em>● LIVE</em><button type="button" data-profile aria-label="Learn accessibility profile">AX</button><button type="button" data-visual-mode aria-label="Cycle visual mode" title="Cycle FX and passthrough modes">FX</button><button type="button" data-front aria-label="Bring window to front">FRONT</button><button type="button" data-smaller aria-label="Make window smaller">−</button><button type="button" data-larger aria-label="Make window larger">+</button><button type="button" data-remove class="release-app" aria-label="Release app from XR workspace" title="Stop mirroring and release this app from XR Shell">RELEASE</button></div></header>
+    <header title="Drag to move this window in the workspace"><div class="capture-title">${source.appIcon ? `<img src="${source.appIcon}" alt="" />` : '<i></i>'}<div><small>HOLOGRAPHIC WINDOW LINK · GRAB TO MOVE</small><span>${escapeHtml(source.name)}</span></div></div><div class="capture-actions"><em>● LIVE</em><button type="button" data-profile aria-label="Learn accessibility profile">AX</button><button type="button" data-visual-mode aria-label="Cycle visual mode" title="Cycle FX and passthrough modes">FX</button><button type="button" data-theme-coverage aria-label="Choose semantic theme coverage" title="Choose how many UI levels XR Shell wraps" hidden>L3</button><button type="button" data-front aria-label="Bring window to front">FRONT</button><button type="button" data-smaller aria-label="Make window smaller">−</button><button type="button" data-larger aria-label="Make window larger">+</button><button type="button" data-remove class="release-app" aria-label="Release app from XR workspace" title="Stop mirroring and release this app from XR Shell">RELEASE</button></div></header>
     <div class="capture-viewport">${source.thumbnail ? `<img class="capture-placeholder" src="${source.thumbnail}" alt="Preview of ${escapeHtml(source.name)}" />` : '<div class="capture-empty"><strong>SCREEN RECORDING REQUIRED</strong>Allow access in Privacy & Security, then add this window again.</div>'}<div class="semantic-layer" aria-hidden="true"></div><div class="xr-cursor" aria-hidden="true"><i></i></div><div class="capture-overlay"><i></i><i></i><i></i><i></i><span>OPTICAL FEED · SECURE</span></div></div>
     <footer><span>30 FPS · GLASS-02 · MIRRORED SURFACE</span><b>DRAG CORNER TO RESIZE</b></footer><div class="resize-grip" title="Drag to resize" aria-hidden="true"></div>`;
   appStage.append(panel);
@@ -256,6 +257,7 @@ async function captureWindow(source, profileName = source?.name) {
     const currentIndex = Math.max(0, modes.indexOf(panel.visualMode));
     setVisualMode(panel, modes[(currentIndex + 1) % modes.length]);
   });
+  panel.querySelector('[data-theme-coverage]').addEventListener('click', () => showThemeIntensity(panel, source.name));
   panel.querySelector('[data-front]').addEventListener('click', () => {
     bringCaptureToFront(source.id, panel);
     raiseNativeWindow(source.id, true);
@@ -300,12 +302,24 @@ async function captureWindow(source, profileName = source?.name) {
     video.addEventListener('resize', fitToSource);
     await video.play();
     fitToSource();
-    window.horizon.windowMetrics(source.id).then((metrics) => {
+    window.horizon.windowMetrics(source.id).then(async (metrics) => {
       const record = capturedWindows.get(source.id);
       if (!record || !metrics?.ok) return;
       record.bundleId = metrics.app?.bundleId || null;
       record.mediaCropTop = clamp(Number(metrics.recommendedCropTop) || 0, 0, video.videoHeight * .3);
       fitToSource();
+      if (record.bundleId) {
+        const profile = await window.horizon.profileDetails(record.bundleId, 'profile').catch(() => null);
+        if (profile?.latestLayout?.length) {
+          record.profileSnapshot = { elements: profile.latestLayout };
+          record.profileEvents = [];
+          if (profile.xrTheme?.palette) {
+            record.theme = profile.xrTheme;
+            applyProfileTheme(panel, profile.xrTheme);
+          }
+          renderSemanticLayer(panel, record.profileSnapshot);
+        }
+      }
     }).catch(() => {});
   } catch (error) {
     const permission = await window.horizon.capturePermission();
@@ -382,13 +396,18 @@ function intensityDescription(value) {
 }
 
 function setThemeIntensity(panel, value, persist = true) {
-  const intensity = clamp(Number(value) || 60, 15, 100);
+  const intensity = clamp(Math.round((Number(value) || 60) / 20) * 20, 20, 100);
   const strength = intensity / 100;
   panel.themeIntensity = intensity;
   panel.dataset.themeLevel = intensity <= 35 ? 'light' : intensity >= 89 ? 'extreme' : 'balanced';
   panel.style.setProperty('--theme-strength', strength.toFixed(2));
   panel.style.setProperty('--theme-mix', `${Math.round(7 + strength * 25)}%`);
   panel.style.setProperty('--theme-inner-mix', `${Math.round(5 + strength * 14)}%`);
+  const coverageButton = panel.querySelector('[data-theme-coverage]');
+  coverageButton.hidden = !panel.xrTheme;
+  coverageButton.textContent = `L${window.XR_SEMANTIC_THEME.coverageLevel(intensity)}`;
+  const captured = [...capturedWindows.values()].find((item) => item.panel === panel);
+  if (captured?.profileSnapshot) renderSemanticLayer(panel, captured.profileSnapshot, captured.profileEvents);
   if (persist) saveThemePreference(panel);
   const button = panel.querySelector('[data-visual-mode]');
   if (panel.xrTheme) button.title = `${panel.xrTheme.name} · ${intensityDescription(intensity)} ${Math.round(intensity)}% · click to toggle`;
@@ -418,7 +437,10 @@ function updateIntensityPreview(value) {
   if (!intensityPanel) return;
   setVisualMode(intensityPanel, 'theme', false);
   setThemeIntensity(intensityPanel, value, false);
-  intensityLabel.value = `${intensityDescription(Number(value))} · ${Math.round(Number(value))}%`;
+  const coverage = intensityPanel.semanticCoverage;
+  intensityLabel.value = coverage
+    ? `Level ${coverage.level}/5 · ${coverage.wrapped.length} wrapped · ${coverage.fx.length} localized FX`
+    : `${intensityDescription(Number(value))} · ${Math.round(Number(value))}%`;
 }
 
 function showThemeIntensity(panel, appName) {
@@ -1076,9 +1098,10 @@ function layoutSurfaceMessages(params, opened, failures) {
 function syncSemanticGeometry(panel) {
   const surface = panel.querySelector('.capture-viewport');
   const video = surface.querySelector('video');
+  const media = video || surface.querySelector('.capture-placeholder');
   const layer = surface.querySelector('.semantic-layer');
-  if (!video || !video.videoWidth || !video.videoHeight) return;
-  const rect = video.getBoundingClientRect();
+  if (!media || (video && (!video.videoWidth || !video.videoHeight))) return;
+  const rect = media.getBoundingClientRect();
   const surfaceRect = surface.getBoundingClientRect();
   layer.style.left = `${rect.left - surfaceRect.left}px`;
   layer.style.top = `${rect.top - surfaceRect.top}px`;
@@ -1096,32 +1119,106 @@ function layoutCapturedMedia(panel, video, cropTop = 0) {
   video.style.height = `${rect.height}px`;
 }
 
+function semanticPoint(event, node, frame) {
+  const rect = node.getBoundingClientRect();
+  const rx = rect.width ? clamp((event.clientX - rect.left) / rect.width, 0, 1) : .5;
+  const ry = rect.height ? clamp((event.clientY - rect.top) / rect.height, 0, 1) : .5;
+  return { x: clamp(frame.x + rx * frame.width, 0, 1), y: clamp(frame.y + ry * frame.height, 0, 1) };
+}
+
+function forwardSemanticKey(event, sourceId) {
+  const modifiers = eventModifiers(event);
+  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+  const keyCode = physicalKeyCodes[event.code] ?? keyCodes[key];
+  if (keyCode !== undefined) window.horizon.sendInput({ sourceId, type: 'key', keyCode, modifiers });
+  else if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    window.horizon.sendInput({ sourceId, type: 'text', text: event.key, modifiers: [] });
+  } else return false;
+  event.preventDefault();
+  event.stopPropagation();
+  return true;
+}
+
+function createSemanticWrapper(panel, element, changed) {
+  const sourceId = panel.dataset.sourceId;
+  const label = semanticLabel(element);
+  let node;
+  if (element.semanticMode === 'a2ui-text-field') {
+    node = document.createElement('input');
+    node.type = 'text';
+    node.placeholder = label || element.role.replace(/^AX/, '');
+    node.autocomplete = 'off';
+    node.spellcheck = false;
+    node.dataset.a2uiComponent = 'TextField';
+    node.addEventListener('keydown', (event) => forwardSemanticKey(event, sourceId));
+  } else if (element.semanticMode === 'a2ui-button') {
+    node = document.createElement('button');
+    node.type = 'button';
+    node.textContent = label || (element.role === 'AXCheckBox' ? '◇' : '◈');
+    node.dataset.a2uiComponent = 'Button';
+  } else {
+    node = document.createElement(element.semanticMode === 'a2ui-text' ? 'span' : 'button');
+    if (node.tagName === 'BUTTON') node.type = 'button';
+    node.textContent = label.slice(0, 80);
+    node.dataset.a2uiComponent = element.semanticMode === 'a2ui-text' ? 'Text' : 'DirectOverlay';
+  }
+  const effect = String(panel.xrTheme?.roleEffects?.[element.role] || '').replace(/[^a-z0-9-]/g, '');
+  node.className = `ax-element ax-wrapper ax-${element.role.slice(2).toLowerCase()}${effect ? ` effect-${effect}` : ''}${changed.has(element.id) ? ' changed' : ''}`;
+  node.dataset.axId = element.id;
+  node.dataset.axRole = element.role;
+  node.title = `${node.dataset.a2uiComponent} proxy → ${element.role} · coverage level ${element.requiredLevel}`;
+  node.setAttribute('aria-label', label || element.role.replace(/^AX/, ''));
+  node.addEventListener('pointerdown', (event) => event.stopPropagation());
+  if (element.semanticMode !== 'a2ui-text') {
+    node.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const captured = capturedWindows.get(sourceId);
+      if (!captured || !inputEnabled) {
+        trackingState.textContent = 'App input is off · choose Enable app input below';
+        return;
+      }
+      selectCapture(sourceId, captured.panel);
+      window.horizon.sendInput({ sourceId, type: 'activate', button: 0, clickCount: event.detail || 1, ...semanticPoint(event, node, element.frame) });
+    });
+  }
+  return node;
+}
+
+function positionSemanticNode(node, frame, textField = false) {
+  const insetX = textField ? Math.min(.004, frame.width * .04) : 0;
+  const insetY = textField ? Math.min(.004, frame.height * .12) : 0;
+  node.style.left = `${clamp(frame.x + insetX, 0, 1) * 100}%`;
+  node.style.top = `${clamp(frame.y + insetY, 0, 1) * 100}%`;
+  node.style.width = `${clamp(frame.width - insetX * 2, 0.005, 1) * 100}%`;
+  node.style.height = `${clamp(frame.height - insetY * 2, 0.005, 1) * 100}%`;
+}
+
 function renderSemanticLayer(panel, snapshot, events = []) {
   const layer = panel.querySelector('.semantic-layer');
   layer.replaceChildren();
   syncSemanticGeometry(panel);
   const changed = new Set(events.map((event) => event.id));
-  const visibleRoles = new Set(['AXButton', 'AXTextField', 'AXTextArea', 'AXLink', 'AXCheckBox',
-    'AXRadioButton', 'AXSlider', 'AXTab', 'AXPopUpButton', 'AXMenuButton', 'AXToolbar', 'AXGroup']);
-  for (const element of (snapshot.elements || []).filter((item) => visibleRoles.has(item.role)).slice(0, 140)) {
-    const frame = element.frame;
-    if (!frame || frame.width > 1.05 || frame.height > 1.05) continue;
+  const coverage = window.XR_SEMANTIC_THEME.buildCoveragePlan(snapshot.elements || [], panel.themeIntensity || 60);
+  panel.semanticCoverage = coverage;
+  panel.dataset.coverageLevel = String(coverage.level);
+  for (const element of coverage.fx) {
     const node = document.createElement('div');
     const effect = String(panel.xrTheme?.roleEffects?.[element.role] || '').replace(/[^a-z0-9-]/g, '');
-    node.className = `ax-element ax-${element.role.slice(2).toLowerCase()}${effect ? ` effect-${effect}` : ''}${changed.has(element.id) ? ' changed' : ''}`;
-    node.style.left = `${clamp(frame.x, 0, 1) * 100}%`;
-    node.style.top = `${clamp(frame.y, 0, 1) * 100}%`;
-    node.style.width = `${clamp(frame.width, 0.005, 1) * 100}%`;
-    node.style.height = `${clamp(frame.height, 0.005, 1) * 100}%`;
-    const label = semanticLabel(element);
-    if (label && frame.width > 0.08 && frame.height > 0.025) {
-      const tag = document.createElement('span');
-      tag.textContent = label.slice(0, 42);
-      node.append(tag);
-    }
+    node.className = `ax-element semantic-fx-region ax-${element.role.slice(2).toLowerCase()}${effect ? ` effect-${effect}` : ''}`;
+    positionSemanticNode(node, element.frame);
+    node.dataset.axRole = element.role;
+    node.title = `${element.role} is too complex to proxy · localized FX fallback`;
     layer.append(node);
   }
-  panel.querySelector('footer b').textContent = `${snapshot.elements?.length || 0} AX NODES · PROFILE LEARNING`;
+  for (const element of coverage.wrapped) {
+    const node = createSemanticWrapper(panel, element, changed);
+    positionSemanticNode(node, element.frame, element.semanticMode === 'a2ui-text-field');
+    layer.append(node);
+  }
+  panel.querySelector('footer b').textContent = panel.classList.contains('profile-themed')
+    ? `THEME L${coverage.level} · ${coverage.wrapped.length} WRAPPED · ${coverage.fx.length} FX`
+    : `${snapshot.elements?.length || 0} AX NODES · PROFILE LEARNING`;
 }
 
 function bindProfileControls(sourceId, panel) {
@@ -1830,7 +1927,23 @@ loadDisplays().catch(() => {
 Promise.all([loadWindows(), window.horizon.isPreviewMode()]).then(async ([, previewMode]) => {
   if (!previewMode) return;
   const mock = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#071925"/><stop offset="1" stop-color="#02080d"/></linearGradient></defs><rect width="1200" height="700" fill="url(#g)"/><rect x="36" y="36" width="250" height="628" rx="18" fill="#0a2231" stroke="#2a7795"/><rect x="315" y="36" width="850" height="628" rx="18" fill="#06141e" stroke="#1f5a73"/><g fill="#66dfff" font-family="sans-serif"><text x="62" y="84" font-size="18">CODEX</text><text x="350" y="88" font-size="16">ACTIVE WORKSPACE</text></g><g fill="#88a8b7" font-family="monospace" font-size="15"><text x="62" y="138">Projects</text><text x="62" y="184">Tasks</text><text x="62" y="230">Agents</text><text x="350" y="150">Design a spatial application shell</text><text x="350" y="196">Inspecting workspace mechanics…</text></g><rect x="350" y="560" width="770" height="62" rx="31" fill="#0a2635" stroke="#3cb8e6"/><text x="382" y="598" fill="#91adba" font-family="sans-serif" font-size="16">Ask Codex anything…</text></svg>`;
-  await captureWindow({ id: 'preview-window', name: 'Codex · Spatial workspace', appIcon: null, thumbnail: `data:image/svg+xml,${encodeURIComponent(mock)}` });
+  const previewCapture = await captureWindow({ id: 'preview-window', name: 'Codex · Spatial workspace', appIcon: null, thumbnail: `data:image/svg+xml,${encodeURIComponent(mock)}` });
+  const previewTheme = {
+    version: 3, name: 'Codex / semantic command deck', motif: 'web',
+    palette: { accent: '#55ddff', secondary: '#9b7cff', surface: '#03121c', line: '#3fb8e8', ink: '#e8faff' },
+    videoFilter: 'saturate(.82) contrast(1.18) brightness(.86)',
+    roleEffects: { AXButton: 'holographic-control', AXTextField: 'luminous-input', AXGroup: 'glass-region' }
+  };
+  previewCapture.profileSnapshot = { elements: [
+    { id: '0.0', role: 'AXGroup', frame: { x: .03, y: .05, width: .21, height: .89 } },
+    { id: '0.0.1', role: 'AXButton', title: 'Projects', frame: { x: .045, y: .15, width: .18, height: .08 } },
+    { id: '0.0.2', role: 'AXButton', title: 'Tasks', frame: { x: .045, y: .24, width: .18, height: .08 } },
+    { id: '0.1', role: 'AXGroup', frame: { x: .263, y: .05, width: .708, height: .89 } },
+    { id: '0.1.0', role: 'AXTextField', placeholder: 'Ask Codex anything…', frame: { x: .292, y: .8, width: .642, height: .089 } }
+  ] };
+  previewCapture.theme = previewTheme;
+  applyProfileTheme(previewCapture.panel, previewTheme);
+  renderSemanticLayer(previewCapture.panel, previewCapture.profileSnapshot);
   renderSpatialMenu({ ok: true, app: { name: 'Codex' }, menus: [
     { title: 'Codex', items: [{ title: 'About Codex', enabled: true, path: [0, 0, 0] }, { separator: true }] },
     { title: 'File', items: [{ title: 'New Task', enabled: true, command: 'N', modifiers: ['command'], path: [1, 0, 0] }, { title: 'Open…', enabled: true, command: 'O', modifiers: ['command'], path: [1, 0, 1] }] },

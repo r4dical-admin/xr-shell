@@ -121,9 +121,9 @@
 
     <dialog id="theme-intensity-dialog" class="xr-dialog intensity-dialog">
       <header><div><small>GENERATED APP THEME</small><h2 id="intensity-title">Choose reskin intensity</h2></div><button type="button" data-intensity-close aria-label="Close">×</button></header>
-      <p>Preview how strongly XR Shell transforms the captured app. You can change this later from its theme button.</p>
-      <label class="intensity-control"><span>Light</span><input id="theme-intensity" type="range" min="15" max="100" value="60" step="1" /><span>Extreme</span></label>
-      <output id="theme-intensity-label">Balanced · 60%</output>
+      <p>Choose how many semantic UI levels XR Shell replaces. Safe controls are wrapped first; complex regions retain their live surface with localized FX.</p>
+      <label class="intensity-control"><span>Level 1</span><input id="theme-intensity" type="range" min="20" max="100" value="60" step="20" /><span>Level 5</span></label>
+      <output id="theme-intensity-label">Level 3/5</output>
       <footer><button type="button" data-intensity-off>Use passthrough</button><button type="button" class="primary" data-intensity-apply>Apply reskin</button></footer>
     </dialog>
 
@@ -143,6 +143,7 @@
     </dialog>
     <script src="a2ui-runtime.js"></script>
     <script src="window-layout.js"></script>
+    <script src="semantic-theme.js"></script>
     <script src="renderer.js"></script>
   </body>
 </html>
