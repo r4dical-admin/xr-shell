@@ -20,6 +20,14 @@ npm install
 npm start
 ```
 
+The command deck uses Codex by default. To use Cursor Agent instead, install and authenticate the Cursor CLI, then launch:
+
+```bash
+npm start -- --backend cursor
+```
+
+XR Shell runs Cursor Agent in non-interactive Ask mode with sandboxing enabled, parses its `stream-json` output, preserves Cursor session IDs for follow-up messages, and still sends XR mutations through the same local allow-listed host broker. It looks for `~/.local/bin/agent`, then the legacy `~/.local/bin/cursor-agent`, then `agent` on `PATH`. Set `XR_CURSOR_CLI=/absolute/path/to/agent` to override discovery. `--backend codex` remains available explicitly.
+
 Set the XREAL to an **extended display**, not mirroring. Select it in the top-right display picker and choose **Open on display**.
 
 To control captured apps, choose **Grant Accessibility access**. The app opens **System Settings → Privacy & Security → Accessibility**; enable `input-bridge`, then return to Horizon. Horizon detects the permission automatically. Click a captured surface to select it; mouse clicks, dragging, scrolling, typing, common shortcuts and navigation keys are forwarded to the original app.
@@ -30,9 +38,9 @@ To arrange the spatial workspace, drag a captured window by its holographic titl
 
 Choose **AX** on a captured window, then use the original app normally for five minutes. XR Shell snapshots the visible macOS Accessibility hierarchy, inventories roles, actions, attributes and parameterized attributes, highlights semantic controls over the live surface, records native AXObserver notifications, and learns structural/focus/value/state patterns by comparing snapshots. It summarizes event frequencies without persisting dynamic control values, then gives the privacy-trimmed profile to a schema-constrained Codex agent. The generated XR palette and role effects are validated, saved in `integration-profiles/<bundle-id>.json`, and applied live. If Codex is unavailable, the deterministic local theme compiler remains the fallback.
 
-The central command deck starts real Codex CLI sessions in a read-only sandbox. XR actions proposed by those sessions pass through a local allow-listed host broker, so creating notes and launching or arranging apps does not depend on Electron/macOS app tagging or non-interactive MCP approval prompts. Sessions appear in the right-hand rail and can be selected and continued. Capturable application windows refresh every two seconds without clearing the current selection. Learned profiles compile to app-specific XR palettes and role effects; Terminal and TextEdit themes are included from the current recordings.
+The central command deck starts real Codex or Cursor Agent CLI sessions in a read-only mode. XR actions proposed by those sessions pass through a local allow-listed host broker, so creating notes and launching or arranging apps does not depend on Electron/macOS app tagging or non-interactive MCP approval prompts. Sessions appear in the right-hand rail and can be selected and continued. Capturable application windows refresh every two seconds without clearing the current selection. Learned profiles compile to app-specific XR palettes and role effects; Terminal and TextEdit themes are included from the current recordings.
 
-Captured windows expose a three-way **THEME → FX → PASS** visual control and a **FRONT** control. These modes are mutually exclusive: Theme uses only the learned app profile, FX uses only the generic holographic shell treatment, and Pass shows a near-original view. Apps without a learned theme cycle between FX and Pass. The window selector refreshes from active macOS windows every two seconds and can be refreshed manually. Width and height controls independently size the panoramic canvas. Codex sessions can be created, resumed, and removed from the session rail; removing a running session stops its local process.
+Captured windows expose a three-way **THEME → FX → PASS** visual control and a **FRONT** control. These modes are mutually exclusive: Theme uses only the learned app profile, FX uses only the generic holographic shell treatment, and Pass shows a near-original view. Apps without a learned theme cycle between FX and Pass. The window selector refreshes from active macOS windows every two seconds and can be refreshed manually. Width and height controls independently size the panoramic canvas. Agent sessions can be created, resumed, and removed from the session rail; removing a running session stops its local process.
 
 The top-bar shell-theme selector changes the full XR environment independently from per-app themes. **Horizon Glass**, **Brass Observatory**, **Atomic Tomorrow**, **Starship Command**, and **Orbital Lounge** each restyle the environment, shared chrome, spatial widgets, and generic captured-window frames. The selected shell theme is saved locally and restored at launch.
 The explicit **RELEASE** control stops mirroring and removes a captured window from XR Shell without closing the original macOS app.
@@ -58,7 +66,7 @@ Configure any MCP client to launch:
 
 The core app tools are `xr_shell_list_apps`, `xr_shell_get_layout`, `xr_shell_pull_app`, `xr_shell_launch_app`, `xr_shell_focus_app`, `xr_shell_transform_app`, and `xr_shell_release_app`; the A2UI tools are described below. `xr_shell_launch_app` accepts an application name, bundle identifier, or absolute `.app` path, waits for a capturable window, attaches it, and automatically applies any matching learned profile. Apps can otherwise be addressed by the source ID returned from the list tool or by a case-insensitive window-name query. Transform coordinates are pixel offsets from the app's automatic layout slot; width and height are pixels constrained to the visible XR workspace.
 
-XR Shell's built-in Codex chat exposes the same controls through its local allow-listed host broker, so requests such as “bring Terminal into the workspace, place it 200 pixels left, and make it 800 × 600” work without a separate approval round trip. Other local agents can use the MCP configuration above.
+XR Shell's built-in agent chat exposes the same controls through its local allow-listed host broker, so requests such as “bring Terminal into the workspace, place it 200 pixels left, and make it 800 × 600” work without a separate approval round trip. Other local agents can use the MCP configuration above.
 
 ### A2UI surfaces
 

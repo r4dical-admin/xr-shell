@@ -9,7 +9,7 @@ const { HeadTracker } = require('./tracking');
 const { InputBridge } = require('./input-bridge');
 const { ProfileStore, diffSnapshots } = require('./profile-store');
 const { ProfileObserver } = require('./profile-observer');
-const { ChatRunner } = require('./chat-runner');
+const { ChatRunner, parseBackend } = require('./chat-runner');
 const { ThemeAgent } = require('./theme-agent');
 
 let mainWindow;
@@ -22,6 +22,7 @@ const PROFILE_DURATION_MS = Math.max(10000, Number(process.env.XR_PROFILE_DURATI
 const inputBridge = new InputBridge();
 const profileStore = new ProfileStore(path.join(__dirname, 'integration-profiles'));
 const profilers = new Map();
+const CHAT_BACKEND = parseBackend(process.argv);
 const tracker = new HeadTracker((value) => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('tracking:pose', value);
 });
@@ -289,7 +290,7 @@ function createWindow() {
     }
   });
   const previewTheme = String(process.env.XR_SHELL_THEME || '').trim();
-  mainWindow.loadFile('index.html', previewTheme ? { query: { shellTheme: previewTheme } } : undefined);
+  mainWindow.loadFile('index.html', { query: { ...(previewTheme ? { shellTheme: previewTheme } : {}), chatBackend: CHAT_BACKEND } });
   if (process.env.HORIZON_CAPTURE === '1') {
     mainWindow.webContents.once('did-finish-load', () => {
       setTimeout(async () => {
@@ -306,6 +307,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   chatRunner = new ChatRunner({
+    backend: CHAT_BACKEND,
     homeDirectory: app.getPath('home'),
     workingDirectory: __dirname,
     getContext: () => handleControlRequest('list_apps'),

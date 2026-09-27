@@ -80,6 +80,11 @@ const menuState = document.getElementById('menu-state');
 const widgetLibrary = document.getElementById('widget-library');
 const widgetLibraryList = document.getElementById('widget-library-list');
 const shellThemePicker = document.getElementById('shell-theme-picker');
+const chatBackend = new URLSearchParams(location.search).get('chatBackend') === 'cursor' ? 'cursor' : 'codex';
+const chatBackendName = chatBackend === 'cursor' ? 'Cursor Agent' : 'Codex';
+
+document.getElementById('session-heading').textContent = `${chatBackendName.toUpperCase()} SESSIONS`;
+document.getElementById('chat-backend-intro').textContent = `Start a read-only ${chatBackendName} session from the command deck.`;
 
 const SHELL_THEMES = new Set(['horizon', 'brass', 'atomic', 'starship', 'orbital']);
 
