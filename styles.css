@@ -415,6 +415,41 @@ body:not([data-shell-theme="horizon"]) .orb-rings i { border-color: color-mix(in
 body:not([data-shell-theme="horizon"]) .projector { background: conic-gradient(from 260deg at 50% 100%, transparent, color-mix(in srgb, var(--cyan) 28%, transparent), transparent 20%); }
 body[data-shell-theme="horizon"] .atmosphere { background: radial-gradient(circle at 50% 48%, rgba(18,104,156,.08), rgba(2,7,12,.48) 84%), linear-gradient(rgba(2,8,13,.12), rgba(2,7,12,.42)), url("assets/backgrounds/horizon.jpg") center / cover no-repeat; }
 
+/* App profiles supply coverage and roles; the environment supplies materials. */
+body[data-shell-theme] .captured-window.profile-themed { background: var(--shell-frame); box-shadow: var(--shell-shadow); }
+body[data-shell-theme] .profile-themed header,
+body[data-shell-theme] .profile-themed footer { background: var(--shell-chrome); border-color: var(--line); }
+body[data-shell-theme] .profile-themed .capture-title small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .12em; }
+body[data-shell-theme] .profile-themed .capture-actions { flex-shrink: 0; gap: 5px; }
+body[data-shell-theme] .profile-themed .capture-actions button { white-space: nowrap; }
+body[data-shell-theme] .profile-themed .capture-actions button[data-mode="theme"],
+body[data-shell-theme] .profile-themed .capture-actions button[data-theme-coverage] { color: var(--ink); border-color: var(--line); background: var(--shell-control-hover); box-shadow: none; }
+body[data-shell-theme] .profile-themed .capture-viewport::before { display: none; }
+body[data-shell-theme] .profile-themed .capture-viewport::after { border-color: var(--line); box-shadow: none; }
+body[data-shell-theme] .profile-themed .capture-viewport video { filter: none; }
+body[data-shell-theme] .profile-themed .ax-wrapper {
+  border: 1px solid var(--line);
+  border-radius: min(var(--shell-radius), 12px);
+  background: var(--shell-chrome) !important;
+  color: var(--ink);
+  font-family: var(--shell-font);
+  font-weight: 500;
+  letter-spacing: .015em;
+  padding: 4px 10px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 2px 7px rgba(0,0,0,.18) !important;
+  backdrop-filter: blur(12px);
+}
+body[data-shell-theme] .profile-themed .ax-wrapper:hover,
+body[data-shell-theme] .profile-themed .ax-wrapper:focus-visible { border-color: var(--cyan); outline: none; background: var(--shell-control-hover) !important; box-shadow: 0 0 0 2px var(--cyan-soft) !important; }
+body[data-shell-theme] .profile-themed .ax-wrapper[data-a2ui-component="TextField"] { border-color: var(--line) !important; border-bottom: 2px solid var(--cyan); background: var(--shell-control) !important; box-shadow: inset 0 2px 6px rgba(0,0,0,.22) !important; cursor: text; }
+body[data-shell-theme] .profile-themed .ax-wrapper[data-a2ui-component="Text"] { border: 0; background: var(--shell-control) !important; box-shadow: none !important; font-weight: 400; }
+body[data-shell-theme] .profile-themed .semantic-fx-region { border: 0; border-left: 1px solid var(--line); border-radius: min(var(--shell-radius), 10px); background: linear-gradient(90deg, var(--cyan-soft), transparent 12%) !important; box-shadow: none !important; opacity: .3; }
+body[data-shell-theme] .profile-themed .semantic-fx-region::after { display: none; }
+body[data-shell-theme="brass"] .profile-themed .ax-wrapper { border-color: #896137; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(255,207,136,.09), 0 2px 5px #100905 !important; }
+body[data-shell-theme="atomic"] .profile-themed .ax-wrapper { border-radius: 16px; border-color: #bb9660; }
+body[data-shell-theme="starship"] .profile-themed .ax-wrapper { border-radius: 3px; border-left: 3px solid var(--cyan); letter-spacing: .04em; }
+body[data-shell-theme="orbital"] .profile-themed .ax-wrapper { border-color: rgba(213,232,243,.25); font-weight: 400; }
+
 @keyframes breathe { 50% { transform: scale(1.035); filter: brightness(1.15); } }
 @keyframes holo-scan { from { transform: translateY(0); } to { transform: translateY(980%); } }
 @keyframes ax-pulse { 0% { background: rgba(113, 237, 255, .35); box-shadow: 0 0 18px rgba(90, 226, 255, .65); } 100% { background: rgba(32, 175, 220, .025); } }

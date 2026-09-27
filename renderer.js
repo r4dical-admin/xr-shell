@@ -357,11 +357,12 @@ function applyProfileTheme(panel, theme) {
   if (!theme?.palette) return;
   panel.xrTheme = theme;
   panel.dataset.motif = theme.motif || 'system';
-  panel.style.setProperty('--profile-accent', theme.palette.accent);
-  panel.style.setProperty('--profile-secondary', theme.palette.secondary);
-  panel.style.setProperty('--profile-surface', theme.palette.surface);
-  panel.style.setProperty('--profile-line', theme.palette.line);
-  panel.style.setProperty('--profile-ink', theme.palette.ink);
+  // Resolve appearance from the live shell theme; profiles retain semantic roles.
+  panel.style.setProperty('--profile-accent', 'var(--cyan)');
+  panel.style.setProperty('--profile-secondary', 'var(--muted)');
+  panel.style.setProperty('--profile-surface', 'var(--shell-control)');
+  panel.style.setProperty('--profile-line', 'var(--cyan)');
+  panel.style.setProperty('--profile-ink', 'var(--ink)');
   panel.style.setProperty('--profile-video-filter', theme.videoFilter);
   const preference = readThemePreference(theme);
   setThemeIntensity(panel, preference.intensity, false);
