@@ -267,7 +267,7 @@ article header b { font-size: 10px; color: var(--muted); font-weight: 400; }
 .session-delete { border: 0; padding: 7px; color: #7893a1; background: transparent; opacity: .58; }
 .session-delete:hover { color: #ff96a4; opacity: 1; background: rgba(255,74,98,.1); }
 
-.controls { position: fixed; z-index: 30; left: 22px; right: 22px; bottom: 14px; min-height: 52px; display: grid; grid-template-columns: auto minmax(150px, .7fr) minmax(150px, .7fr) 150px 1fr; align-items: center; gap: 16px; color: var(--muted); font-size: 11px; }
+.controls { position: fixed; z-index: 30; left: 22px; right: 22px; bottom: 14px; min-height: 52px; display: grid; grid-template-columns: auto minmax(130px, .7fr) minmax(130px, .7fr) minmax(130px, .7fr) 140px 1fr; align-items: center; gap: 14px; color: var(--muted); font-size: 11px; }
 .control-group { display: flex; gap: 8px; }
 #enable-input.enabled { color: #86f3bd; border-color: rgba(83, 226, 155, .58); background: rgba(27, 159, 103, .14); box-shadow: 0 0 18px rgba(54, 214, 140, .12); }
 .controls label { display: grid; grid-template-columns: auto auto; gap: 4px 10px; align-items: center; }
@@ -415,5 +415,5 @@ body[data-shell-theme="horizon"] .atmosphere { background: radial-gradient(circl
 @keyframes ax-frame-pulse { 0% { opacity: 1; filter: drop-shadow(0 0 14px #75e8ff); } 100% { opacity: .72; filter: none; } }
 @media (prefers-reduced-motion: reduce) { .orb, .captured-window::after { animation: none; } }
 @media (max-width: 1450px) { #display-picker, #open-display, .tracking-status { display: none; } .topbar { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 1100px) { .tracking-status { display: none; } .topbar { grid-template-columns: 1fr 1fr; } .controls { grid-template-columns: auto 1fr 1fr 120px; } .hint { display: none; } }
+@media (max-width: 1100px) { .tracking-status { display: none; } .topbar { grid-template-columns: 1fr 1fr; } .controls { grid-template-columns: auto 1fr 1fr 1fr 110px; } .hint { display: none; } }
 @media (max-width: 760px) { .library-layout { grid-template-columns: 1fr; } }

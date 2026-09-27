@@ -30,7 +30,7 @@ XR Shell runs Cursor Agent in non-interactive Ask mode with sandboxing enabled, 
 
 Set the XREAL to an **extended display**, not mirroring. Select it in the top-right display picker and choose **Open on display**.
 
-To control captured apps, choose **Grant Accessibility access**. The app opens **System Settings → Privacy & Security → Accessibility**; enable `input-bridge`, then return to Horizon. Horizon detects the permission automatically. Click a captured surface to select it; mouse clicks, dragging, scrolling, typing, common shortcuts and navigation keys are forwarded to the original app.
+To control captured apps, choose **Grant Accessibility access**. The app opens **System Settings → Privacy & Security → Accessibility**; enable `input-bridge`, then return to Horizon. Horizon detects the permission automatically. Click a captured surface to select it; XR Shell raises and focuses the real source window before forwarding mouse clicks, dragging, scrolling, typing, common shortcuts and navigation keys. The **FRONT** control also raises both the XR wrapper and its native macOS window.
 
 If `input-bridge` is not listed, use the **+** button in Accessibility settings, press **Command-Shift-G**, and enter `/Users/ido/Documents/xr-shell/.build/input-bridge`. If an older disabled entry exists after rebuilding, remove it with **−**, add the current helper again, and enable its switch.
 
@@ -84,6 +84,7 @@ Rendered components are self-contained after creation. Dragging, closing, local 
 When profile learning finishes, XR Shell opens an intensity preview from **Light** to **Extreme** and remembers the choice for that theme. The top-bar **Profiles** library can inspect the complete local profile or its recording-derived AX summary, regenerate the reskin from the saved recording, or delete the recording separately while preserving the generated theme.
 
 For live tracking, connect the One Pro directly over USB-C, enable Ethernet in its developer menu, use flat Follow display mode, click **Connect XREAL**, hold still while calibration completes, and press **Recenter** while facing forward.
+Use the persistent **Vertical trim** slider if the stabilized workspace rests too high or low for your glasses: positive values move it downward and negative values move it upward.
 
 ## Implemented
 

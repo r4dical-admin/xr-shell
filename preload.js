@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('horizon', {
   respondControl: (response) => ipcRenderer.send('control:response', response),
   listDisplays: () => ipcRenderer.invoke('display:list'),
   listWindows: () => ipcRenderer.invoke('window:list'),
+  raiseWindow: (sourceId) => ipcRenderer.invoke('window:raise', sourceId),
   windowMetrics: (sourceId) => ipcRenderer.invoke('window:metrics', sourceId),
   capturePermission: () => ipcRenderer.invoke('capture:permission'),
   moveToDisplay: (id) => ipcRenderer.invoke('display:move', id),

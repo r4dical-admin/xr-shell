@@ -227,6 +227,25 @@ static NSDictionary *WindowMetrics(uint32_t windowID) {
     };
 }
 
+static BOOL RaiseTargetWindow(uint32_t windowID) {
+    pid_t pid = 0;
+    CGRect bounds;
+    if (!WindowDetails(windowID, &pid, &bounds)) return NO;
+    NSRunningApplication *running = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    BOOL ok = [running activateWithOptions:0];
+    AXUIElementRef application = AXUIElementCreateApplication(pid);
+    AXUIElementSetMessagingTimeout(application, 0.8);
+    if (AXUIElementSetAttributeValue(application, kAXFrontmostAttribute, kCFBooleanTrue) == kAXErrorSuccess) ok = YES;
+    AXUIElementRef window = BestAccessibilityWindow(application, bounds);
+    if (window) {
+        if (AXUIElementSetAttributeValue(application, kAXFocusedWindowAttribute, window) == kAXErrorSuccess) ok = YES;
+        if (AXUIElementPerformAction(window, kAXRaiseAction) == kAXErrorSuccess) ok = YES;
+        CFRelease(window);
+    }
+    CFRelease(application);
+    return ok;
+}
+
 static NSDictionary *AccessibilitySnapshot(uint32_t windowID) {
     pid_t pid = 0;
     CGRect bounds;
@@ -686,6 +705,11 @@ int main(int argc, const char *argv[]) {
                     NSMutableDictionary *snapshot = [AccessibilitySnapshot([command[@"windowId"] unsignedIntValue]) mutableCopy];
                     snapshot[@"id"] = requestID;
                     Emit(snapshot);
+                    continue;
+                }
+                if ([type isEqualToString:@"raise-window"]) {
+                    BOOL ok = RaiseTargetWindow([command[@"windowId"] unsignedIntValue]);
+                    Emit(@{ @"id": requestID, @"ok": @(ok), @"error": ok ? NSNull.null : @"window-raise-failed" });
                     continue;
                 }
                 if ([type isEqualToString:@"window-metrics"]) {

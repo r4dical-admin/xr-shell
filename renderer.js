@@ -65,6 +65,8 @@ const scaleInput = document.getElementById('scale');
 const scaleOutput = document.getElementById('scale-output');
 const heightScaleInput = document.getElementById('height-scale');
 const heightScaleOutput = document.getElementById('height-scale-output');
+const verticalTrimInput = document.getElementById('vertical-trim');
+const verticalTrimOutput = document.getElementById('vertical-trim-output');
 const canvasReadout = document.getElementById('canvas-readout');
 const minimapView = document.getElementById('minimap-view');
 const connectButton = document.getElementById('connect');
@@ -121,6 +123,9 @@ let poseTime = 0;
 let headQuaternion = [0, 0, 0, 1];
 let virtualScale = Number(scaleInput.value);
 let virtualHeightScale = Number(heightScaleInput.value);
+let verticalTrimDegrees = Math.max(-8, Math.min(8, Number(localStorage.getItem('xr-shell:vertical-trim')) || 0));
+verticalTrimInput.value = String(verticalTrimDegrees);
+verticalTrimOutput.value = `${verticalTrimDegrees > 0 ? '+' : ''}${verticalTrimDegrees}°`;
 let availableWindows = [];
 let availableWindowsSignature = null;
 let windowRefreshPromise = null;
@@ -251,7 +256,10 @@ async function captureWindow(source, profileName = source?.name) {
     const currentIndex = Math.max(0, modes.indexOf(panel.visualMode));
     setVisualMode(panel, modes[(currentIndex + 1) % modes.length]);
   });
-  panel.querySelector('[data-front]').addEventListener('click', () => bringCaptureToFront(source.id, panel));
+  panel.querySelector('[data-front]').addEventListener('click', () => {
+    bringCaptureToFront(source.id, panel);
+    raiseNativeWindow(source.id, true);
+  });
   layoutCapturedWindows();
   bringCaptureToFront(source.id, panel);
   centerWorkspace();
@@ -532,6 +540,17 @@ function bringCaptureToFront(sourceId, panel) {
   }
   panel.style.zIndex = String(100 + frontOrder);
   refreshSpatialMenu(sourceId);
+}
+
+function raiseNativeWindow(sourceId, force = false) {
+  const captured = capturedWindows.get(sourceId);
+  if (!captured || !inputEnabled) return;
+  const now = performance.now();
+  if (!force && now - Number(captured.lastNativeRaise || 0) < 450) return;
+  captured.lastNativeRaise = now;
+  window.horizon.raiseWindow(sourceId).then((result) => {
+    if (!result?.ok) trackingState.textContent = `Could not raise source window · ${result?.error || 'unknown error'}`;
+  }).catch(() => {});
 }
 
 function menuShortcut(item) {
@@ -1334,6 +1353,7 @@ function selectCapture(sourceId, panel) {
   panel.classList.add('input-active');
   bringCaptureToFront(sourceId, panel);
   panel.focus({ preventScroll: true });
+  raiseNativeWindow(sourceId);
 }
 
 function bindCapturedInput(sourceId, panel) {
@@ -1734,6 +1754,14 @@ heightScaleInput.addEventListener('input', () => {
   canvasReadout.textContent = `${virtualScale.toFixed(2).replace(/0$/, '')}× width · ${virtualHeightScale.toFixed(2).replace(/0$/, '')}× height`;
   minimapView.style.height = `${100 / virtualHeightScale}%`;
 });
+verticalTrimInput.addEventListener('input', () => {
+  verticalTrimDegrees = clamp(Number(verticalTrimInput.value) || 0, -8, 8);
+  verticalTrimOutput.value = `${verticalTrimDegrees > 0 ? '+' : ''}${verticalTrimDegrees}°`;
+  localStorage.setItem('xr-shell:vertical-trim', String(verticalTrimDegrees));
+  trackingState.textContent = verticalTrimDegrees === 0
+    ? 'Vertical drift trim centered'
+    : `Vertical trim ${verticalTrimDegrees > 0 ? 'down' : 'up'} ${Math.abs(verticalTrimDegrees)}°`;
+});
 
 window.horizon.onPose((pose) => {
   const labels = {
@@ -1778,7 +1806,7 @@ function animate(now) {
   if (trackingEnabled && poseTime && now - poseTime < 250) {
     const angles = quaternionToYXZ(headQuaternion);
     targetYaw = yawStabilizer.update(angles.yaw, dt);
-    targetPitch = pitchStabilizer.update(angles.pitch, dt);
+    targetPitch = pitchStabilizer.update(angles.pitch, dt) + verticalTrimDegrees * Math.PI / 180;
   } else if (trackingEnabled && poseTime && now - poseTime >= 250) {
     trackingState.textContent = 'Signal stale · view held';
   }

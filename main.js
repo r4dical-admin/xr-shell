@@ -381,6 +381,10 @@ app.whenReady().then(() => {
     ? systemPreferences.getMediaAccessStatus('screen')
     : 'granted');
   ipcMain.handle('window:list', () => availableApplicationWindows(true));
+  ipcMain.handle('window:raise', (_event, sourceId) => {
+    const windowId = sourceWindowId(sourceId);
+    return windowId === null ? { ok: false, error: 'invalid-window-source' } : inputBridge.request({ type: 'raise-window', windowId });
+  });
   ipcMain.handle('window:metrics', (_event, sourceId) => {
     const windowId = sourceWindowId(sourceId);
     return windowId === null ? { ok: false, error: 'invalid-window-source' } : inputBridge.request({ type: 'window-metrics', windowId });
