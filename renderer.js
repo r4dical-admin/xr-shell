@@ -1390,6 +1390,7 @@ async function handleAgentControl(method, params = {}) {
   }
   if (method === 'focus_app') {
     selectCapture(sourceId, captured.panel);
+    raiseNativeWindow(sourceId, true);
     return capturedLayoutItem(sourceId, captured);
   }
   if (method === 'transform_app') {
@@ -1450,7 +1451,6 @@ function selectCapture(sourceId, panel) {
   panel.classList.add('input-active');
   bringCaptureToFront(sourceId, panel);
   panel.focus({ preventScroll: true });
-  raiseNativeWindow(sourceId);
 }
 
 function bindCapturedInput(sourceId, panel) {
@@ -1712,7 +1712,9 @@ function bindSpatialControls(sourceId, panel) {
     const dy = event.clientY - gesture.startY;
     if (gesture.mode === 'resize') {
       panel.dataset.manualSize = 'true';
-      setPanelSize(panel, gesture.width + dx, gesture.height + dy);
+      const limits = window.XR_WINDOW_LAYOUT.manualPanelLimits(appStage.clientWidth, appStage.clientHeight);
+      const size = window.XR_WINDOW_LAYOUT.resizedPanelSize(gesture.width, gesture.height, dx, dy, limits);
+      setPanelSize(panel, size.width, size.height);
       return;
     }
     const maxX = appStage.clientWidth * 0.42;
@@ -1730,11 +1732,13 @@ function bindSpatialControls(sourceId, panel) {
   const finish = (event) => {
     if (!gesture || (Number.isFinite(event.pointerId) && event.pointerId !== gesture.pointerId)) return;
     const { captureTarget, pointerId } = gesture;
+    const shouldRaise = event.type === 'pointerup';
     gesture = null;
     panel.classList.remove('positioning');
     try {
       if (captureTarget.hasPointerCapture(pointerId)) captureTarget.releasePointerCapture(pointerId);
     } catch { /* pointer capture may already have been released by the OS */ }
+    if (shouldRaise) setTimeout(() => raiseNativeWindow(sourceId, true), 0);
   };
 
   header.addEventListener('pointerdown', (event) => begin(event, 'move'));

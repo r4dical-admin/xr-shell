@@ -738,12 +738,13 @@ int main(int argc, const char *argv[]) {
                 BOOL ok = NO;
                 if ([type isEqualToString:@"pointer"]) ok = PostPointer(command, pid, point, [command[@"windowId"] unsignedIntValue]);
                 else if ([type isEqualToString:@"activate"]) {
+                    RaiseTargetWindow([command[@"windowId"] unsignedIntValue]);
                     ok = ActivateAtPoint(pid, point, [command[@"button"] integerValue], [command[@"windowId"] unsignedIntValue]);
                     if (!ok) ok = FallbackClick(command, pid, point, [command[@"windowId"] unsignedIntValue]);
                 }
-                else if ([type isEqualToString:@"scroll"]) ok = PostScroll(command, pid, point);
-                else if ([type isEqualToString:@"text"]) ok = PostText(command, pid);
-                else if ([type isEqualToString:@"key"]) ok = PostKey(command, pid);
+                else if ([type isEqualToString:@"scroll"]) { RaiseTargetWindow([command[@"windowId"] unsignedIntValue]); ok = PostScroll(command, pid, point); }
+                else if ([type isEqualToString:@"text"]) { RaiseTargetWindow([command[@"windowId"] unsignedIntValue]); ok = PostText(command, pid); }
+                else if ([type isEqualToString:@"key"]) { RaiseTargetWindow([command[@"windowId"] unsignedIntValue]); ok = PostKey(command, pid); }
                 Emit(@{@"id": requestID, @"ok": @(ok), @"error": ok ? NSNull.null : @"unsupported-input"});
             }
         }

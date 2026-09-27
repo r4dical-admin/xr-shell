@@ -45,6 +45,19 @@
     };
   }
 
+  function resizedPanelSize(width, height, deltaX, deltaY, limits) {
+    const startWidth = Math.max(420, Number(width) || 420);
+    const contentHeight = Math.max(1, (Number(height) || 280) - CHROME_HEIGHT);
+    const horizontalScale = (startWidth + (Number(deltaX) || 0)) / startWidth;
+    const verticalScale = (contentHeight + (Number(deltaY) || 0)) / contentHeight;
+    const scale = Math.abs(Number(deltaX) || 0) / startWidth >= Math.abs(Number(deltaY) || 0) / contentHeight
+      ? horizontalScale : verticalScale;
+    const minScale = Math.max(420 / startWidth, (280 - CHROME_HEIGHT) / contentHeight);
+    const maxScale = Math.min(Number(limits?.maxWidth) / startWidth, (Number(limits?.maxHeight) - CHROME_HEIGHT) / contentHeight);
+    const safeScale = Math.max(minScale, Math.min(Math.max(minScale, maxScale), scale));
+    return { width: startWidth * safeScale, height: contentHeight * safeScale + CHROME_HEIGHT };
+  }
+
   function containedMediaRect(mediaWidth, mediaHeight, boxWidth, boxHeight, cropTop = 0) {
     const sourceWidth = Math.max(1, Number(mediaWidth) || 1);
     const sourceHeight = Math.max(1, Number(mediaHeight) || 1);
@@ -63,5 +76,5 @@
     };
   }
 
-  return { MAX_WINDOWS, MAX_HORIZONTAL_SCALE, CHROME_HEIGHT, containedMediaRect, manualPanelLimits, requiredHorizontalScale, horizontalSlots, fittedPanelSize };
+  return { MAX_WINDOWS, MAX_HORIZONTAL_SCALE, CHROME_HEIGHT, containedMediaRect, manualPanelLimits, resizedPanelSize, requiredHorizontalScale, horizontalSlots, fittedPanelSize };
 });

@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { MAX_HORIZONTAL_SCALE, containedMediaRect, fittedPanelSize, horizontalSlots, manualPanelLimits, requiredHorizontalScale } = require('../window-layout');
+const { MAX_HORIZONTAL_SCALE, containedMediaRect, fittedPanelSize, horizontalSlots, manualPanelLimits, resizedPanelSize, requiredHorizontalScale } = require('../window-layout');
 
 test('captured wrappers preserve the source dimensions while fitting the XR stage', () => {
   assert.deepEqual(fittedPanelSize(800, 600, 3000, 1000), { width: 800, height: 694 });
@@ -22,6 +22,16 @@ test('large native title regions can be cropped without distorting media geometr
 test('manual resizing can grow well beyond the native auto-fit limit', () => {
   assert.deepEqual(manualPanelLimits(3000, 1000), { maxWidth: 2460, maxHeight: 960 });
   assert.ok(manualPanelLimits(3000, 1000).maxWidth > fittedPanelSize(800, 600, 3000, 1000).width);
+});
+
+test('corner resizing preserves captured content aspect ratio at window limits', () => {
+  const limits = manualPanelLimits(3000, 1500);
+  const resized = resizedPanelSize(800, 694, 400, 20, limits);
+  assert.deepEqual(resized, { width: 1200, height: 994 });
+  const tighterLimits = manualPanelLimits(3000, 1000);
+  const capped = resizedPanelSize(800, 694, 4000, 4000, tighterLimits);
+  assert.ok(capped.width <= tighterLimits.maxWidth && capped.height <= tighterLimits.maxHeight);
+  assert.ok(Math.abs(capped.width / (capped.height - 94) - 800 / 600) < 0.0001);
 });
 
 test('more captured apps expand the reachable canvas up to seven times', () => {
