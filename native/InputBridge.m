@@ -427,13 +427,32 @@ static BOOL FocusAndPlaceCaret(AXUIElementRef element, CGPoint point) {
     return handled;
 }
 
-static BOOL ActivateAtPoint(pid_t pid, CGPoint point, NSInteger button) {
+static AXUIElementRef CopyDeepestElementAtPoint(AXUIElementRef element, CGPoint point, NSUInteger depth) {
+    if (!element || depth > 12) return NULL;
+    CGRect frame;
+    if (ElementFrame(element, &frame) && !CGRectContainsPoint(CGRectInset(frame, -1.0, -1.0), point)) return NULL;
+    id childObject = CopyAttribute(element, kAXChildrenAttribute);
+    NSArray *children = [childObject isKindOfClass:NSArray.class] ? childObject : @[];
+    for (id childObject in children.reverseObjectEnumerator) {
+        AXUIElementRef child = (__bridge AXUIElementRef)childObject;
+        AXUIElementRef match = CopyDeepestElementAtPoint(child, point, depth + 1);
+        if (match) return match;
+    }
+    CFRetain(element);
+    return element;
+}
+
+static BOOL ActivateAtPoint(pid_t pid, CGPoint point, NSInteger button, uint32_t windowID) {
+    CGRect bounds;
+    pid_t verifiedPID = 0;
+    if (!WindowDetails(windowID, &verifiedPID, &bounds) || verifiedPID != pid) return NO;
     AXUIElementRef application = AXUIElementCreateApplication(pid);
     AXUIElementSetMessagingTimeout(application, 0.8);
-    AXUIElementRef hit = NULL;
-    AXError hitError = AXUIElementCopyElementAtPosition(application, point.x, point.y, &hit);
+    AXUIElementRef window = BestAccessibilityWindow(application, bounds);
+    AXUIElementRef hit = window ? CopyDeepestElementAtPoint(window, point, 0) : NULL;
+    if (window) CFRelease(window);
     CFRelease(application);
-    if (hitError != kAXErrorSuccess || !hit) return NO;
+    if (!hit) return NO;
 
     BOOL handled = NO;
     AXUIElementRef current = hit;
@@ -695,7 +714,7 @@ int main(int argc, const char *argv[]) {
                 BOOL ok = NO;
                 if ([type isEqualToString:@"pointer"]) ok = PostPointer(command, pid, point, [command[@"windowId"] unsignedIntValue]);
                 else if ([type isEqualToString:@"activate"]) {
-                    ok = ActivateAtPoint(pid, point, [command[@"button"] integerValue]);
+                    ok = ActivateAtPoint(pid, point, [command[@"button"] integerValue], [command[@"windowId"] unsignedIntValue]);
                     if (!ok) ok = FallbackClick(command, pid, point, [command[@"windowId"] unsignedIntValue]);
                 }
                 else if ([type isEqualToString:@"scroll"]) ok = PostScroll(command, pid, point);

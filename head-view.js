@@ -36,7 +36,15 @@ class HeadView {
 }
 
 class PitchStabilizer {
-  constructor() { this.reset(); }
+  constructor(options = {}) {
+    this.deadzone = Number(options.deadzone) || 0.022;
+    this.gain = Number(options.gain) || 0.72;
+    this.stillRate = Number(options.stillRate) || 0.03;
+    this.settleTime = Number(options.settleTime) || 0.4;
+    this.followTime = Number(options.followTime) || 0.9;
+    this.captureRadius = Number(options.captureRadius) || 0.08;
+    this.reset();
+  }
 
   reset() {
     this.neutral = undefined;
@@ -52,16 +60,17 @@ class PitchStabilizer {
       return 0;
     }
     const elapsed = Math.max(0.001, Math.min(0.05, dt));
-    const rate = this.previous === undefined ? Infinity : Math.abs(pitch - this.previous) / elapsed;
+    const delta = this.previous === undefined ? 0 : Math.atan2(Math.sin(pitch - this.previous), Math.cos(pitch - this.previous));
+    const rate = Math.abs(delta) / elapsed;
     this.previous = pitch;
-    this.stillTime = rate < 0.035 ? this.stillTime + elapsed : 0;
-    if (this.stillTime > 0.9) {
-      const alpha = 1 - Math.exp(-elapsed / 7);
-      this.neutral += (pitch - this.neutral) * alpha;
+    this.stillTime = rate < this.stillRate ? this.stillTime + elapsed : 0;
+    const relativeBeforeCorrection = Math.atan2(Math.sin(pitch - this.neutral), Math.cos(pitch - this.neutral));
+    if (this.stillTime > this.settleTime && Math.abs(relativeBeforeCorrection) < this.captureRadius) {
+      const alpha = 1 - Math.exp(-elapsed / this.followTime);
+      this.neutral += relativeBeforeCorrection * alpha;
     }
-    const relative = pitch - this.neutral;
-    const deadzone = 0.026;
-    return Math.sign(relative) * Math.max(0, Math.abs(relative) - deadzone) * 0.62;
+    const relative = Math.atan2(Math.sin(pitch - this.neutral), Math.cos(pitch - this.neutral));
+    return Math.sign(relative) * Math.max(0, Math.abs(relative) - this.deadzone) * this.gain;
   }
 }
 

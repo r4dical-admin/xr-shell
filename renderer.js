@@ -23,7 +23,15 @@ function requireRendererHeadView() {
     }
   }
   class RendererPitchStabilizer {
-    constructor() { this.reset(); }
+    constructor(options = {}) {
+      this.deadzone = Number(options.deadzone) || 0.022;
+      this.gain = Number(options.gain) || 0.72;
+      this.stillRate = Number(options.stillRate) || 0.03;
+      this.settleTime = Number(options.settleTime) || 0.4;
+      this.followTime = Number(options.followTime) || 0.9;
+      this.captureRadius = Number(options.captureRadius) || 0.08;
+      this.reset();
+    }
     reset() { this.neutral = undefined; this.previous = undefined; this.stillTime = 0; }
     update(pitch, dt) {
       if (!Number.isFinite(pitch)) return 0;
@@ -33,12 +41,16 @@ function requireRendererHeadView() {
         return 0;
       }
       const elapsed = Math.max(0.001, Math.min(0.05, dt));
-      const rate = this.previous === undefined ? Infinity : Math.abs(pitch - this.previous) / elapsed;
+      const delta = this.previous === undefined ? 0 : Math.atan2(Math.sin(pitch - this.previous), Math.cos(pitch - this.previous));
+      const rate = Math.abs(delta) / elapsed;
       this.previous = pitch;
-      this.stillTime = rate < 0.035 ? this.stillTime + elapsed : 0;
-      if (this.stillTime > 0.9) this.neutral += (pitch - this.neutral) * (1 - Math.exp(-elapsed / 7));
-      const relative = pitch - this.neutral;
-      return Math.sign(relative) * Math.max(0, Math.abs(relative) - 0.026) * 0.62;
+      this.stillTime = rate < this.stillRate ? this.stillTime + elapsed : 0;
+      const before = Math.atan2(Math.sin(pitch - this.neutral), Math.cos(pitch - this.neutral));
+      if (this.stillTime > this.settleTime && Math.abs(before) < this.captureRadius) {
+        this.neutral += before * (1 - Math.exp(-elapsed / this.followTime));
+      }
+      const relative = Math.atan2(Math.sin(pitch - this.neutral), Math.cos(pitch - this.neutral));
+      return Math.sign(relative) * Math.max(0, Math.abs(relative) - this.deadzone) * this.gain;
     }
   }
   return { HeadView: RendererHeadView, PitchStabilizer: RendererPitchStabilizer };
@@ -101,6 +113,7 @@ applyShellTheme(previewShellTheme || localStorage.getItem('xr-shell:shell-theme'
 
 const headView = new HeadView();
 const pitchStabilizer = new PitchStabilizer();
+const yawStabilizer = new PitchStabilizer({ deadzone: 0.014, gain: 0.9, captureRadius: 0.065 });
 let targetYaw = 0;
 let targetPitch = 0;
 let trackingEnabled = false;
@@ -1140,6 +1153,7 @@ function centerWorkspace() {
   poseTime = 0;
   headView.reset();
   pitchStabilizer.reset();
+  yawStabilizer.reset();
   window.horizon.trackingControl('recenter');
 }
 
@@ -1540,8 +1554,7 @@ function clamp(value, minimum, maximum) {
 }
 
 function setPanelSize(panel, width, height) {
-  const maxWidth = Math.min(1100, appStage.clientWidth * 0.48);
-  const maxHeight = appStage.clientHeight * 0.9;
+  const { maxWidth, maxHeight } = window.XR_WINDOW_LAYOUT.manualPanelLimits(appStage.clientWidth, appStage.clientHeight);
   panel.style.setProperty('--panel-width', `${clamp(width, 420, maxWidth)}px`);
   panel.style.setProperty('--panel-height', `${clamp(height, 280, maxHeight)}px`);
 }
@@ -1764,7 +1777,7 @@ function animate(now) {
   previous = now;
   if (trackingEnabled && poseTime && now - poseTime < 250) {
     const angles = quaternionToYXZ(headQuaternion);
-    targetYaw = angles.yaw;
+    targetYaw = yawStabilizer.update(angles.yaw, dt);
     targetPitch = pitchStabilizer.update(angles.pitch, dt);
   } else if (trackingEnabled && poseTime && now - poseTime >= 250) {
     trackingState.textContent = 'Signal stale · view held';

@@ -39,7 +39,7 @@ test('pitch stabilizer ignores its dead-zone and slowly cancels stationary drift
   const stabilizer = new PitchStabilizer();
   assert.equal(stabilizer.update(0.015, 1 / 60), 0);
   let corrected;
-  for (let index = 0; index < 1200; index += 1) corrected = stabilizer.update(0.12, 1 / 60);
+  for (let index = 0; index < 180; index += 1) corrected = stabilizer.update(0.06, 1 / 60);
   assert.ok(Math.abs(corrected) < 0.01);
 });
 
@@ -47,4 +47,12 @@ test('pitch stabilizer preserves deliberate movement immediately', () => {
   const stabilizer = new PitchStabilizer();
   stabilizer.update(0, 1 / 60);
   assert.ok(stabilizer.update(0.18, 1 / 60) > 0.09);
+});
+
+test('stationary correction does not recenter an intentional held pose', () => {
+  const stabilizer = new PitchStabilizer();
+  stabilizer.update(0, 1 / 60);
+  let corrected;
+  for (let index = 0; index < 300; index += 1) corrected = stabilizer.update(0.18, 1 / 60);
+  assert.ok(corrected > 0.09);
 });

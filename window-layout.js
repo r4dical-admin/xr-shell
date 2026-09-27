@@ -38,6 +38,13 @@
     };
   }
 
+  function manualPanelLimits(stageWidth, stageHeight) {
+    return {
+      maxWidth: Math.max(420, (Number(stageWidth) || 1) * 0.82),
+      maxHeight: Math.max(280, (Number(stageHeight) || 1) * 0.96)
+    };
+  }
+
   function containedMediaRect(mediaWidth, mediaHeight, boxWidth, boxHeight, cropTop = 0) {
     const sourceWidth = Math.max(1, Number(mediaWidth) || 1);
     const sourceHeight = Math.max(1, Number(mediaHeight) || 1);
@@ -56,5 +63,5 @@
     };
   }
 
-  return { MAX_WINDOWS, MAX_HORIZONTAL_SCALE, CHROME_HEIGHT, containedMediaRect, requiredHorizontalScale, horizontalSlots, fittedPanelSize };
+  return { MAX_WINDOWS, MAX_HORIZONTAL_SCALE, CHROME_HEIGHT, containedMediaRect, manualPanelLimits, requiredHorizontalScale, horizontalSlots, fittedPanelSize };
 });
