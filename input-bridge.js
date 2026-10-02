@@ -5,14 +5,17 @@ const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 
 class InputBridge {
-  constructor() {
+  constructor(options = {}) {
     this.sequence = 0;
     this.pending = new Map();
+    this.queue = [];
+    this.active = null;
+    this.spawnProcess = options.spawnProcess || spawn;
   }
 
   start() {
     if (this.process && !this.process.killed) return;
-    this.process = spawn(path.join(__dirname, '.build', 'input-bridge'), [], { stdio: ['pipe', 'pipe', 'pipe'] });
+    this.process = this.spawnProcess(path.join(__dirname, '.build', 'input-bridge'), [], { stdio: ['pipe', 'pipe', 'pipe'] });
     const lines = readline.createInterface({ input: this.process.stdout });
     lines.on('line', (line) => {
       let message;
@@ -21,34 +24,74 @@ class InputBridge {
       if (!pending) return;
       this.pending.delete(message.id);
       clearTimeout(pending.timeout);
+      this.active = null;
       pending.resolve(message);
+      this.drain();
     });
-    this.process.once('exit', () => {
+    const process = this.process;
+    process.once('exit', () => {
+      if (this.process !== process) return;
       this.process = undefined;
-      for (const pending of this.pending.values()) {
-        clearTimeout(pending.timeout);
-        pending.reject(new Error('Input bridge stopped'));
-      }
-      this.pending.clear();
+      this.failAll(new Error('Input bridge stopped'));
+    });
+    process.once('error', (error) => {
+      if (this.process !== process) return;
+      this.process = undefined;
+      this.failAll(error);
     });
   }
 
   request(command) {
-    this.start();
-    const id = ++this.sequence;
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error('Input bridge timed out'));
-      }, ['snapshot', 'menu-snapshot', 'window-metrics'].includes(command.type) ? 8000 : 4000);
-      this.pending.set(id, { resolve, reject, timeout });
-      this.process.stdin.write(`${JSON.stringify({ ...command, id })}\n`);
+      const transient = command.type === 'pointer' && ['move', 'drag'].includes(command.phase);
+      const previous = this.queue.at(-1);
+      if (transient && previous?.command.type === 'pointer'
+          && previous.command.phase === command.phase && previous.command.windowId === command.windowId) {
+        previous.resolve({ ok: true, coalesced: true });
+        this.queue.pop();
+      }
+      this.queue.push({ command, resolve, reject });
+      this.drain();
     });
+  }
+
+  drain() {
+    if (this.active || !this.queue.length) return;
+    try { this.start(); } catch (error) { this.failAll(error); return; }
+    const item = this.queue.shift();
+    const id = ++this.sequence;
+    this.active = item;
+    const timeoutMs = ['snapshot', 'menu-snapshot', 'window-metrics'].includes(item.command.type) ? 12000
+      : item.command.type === 'activate' ? 10000 : 6000;
+    const timeout = setTimeout(() => {
+      this.process?.kill();
+      this.process = undefined;
+      this.failAll(new Error(`Input bridge timed out (${item.command.type})`));
+    }, timeoutMs);
+    this.pending.set(id, { ...item, timeout });
+    this.process.stdin.write(`${JSON.stringify({ ...item.command, id })}\n`, (error) => {
+      if (error && this.pending.has(id)) {
+        clearTimeout(timeout);
+        this.pending.delete(id);
+        this.active = null;
+        item.reject(error);
+        this.drain();
+      }
+    });
+  }
+
+  failAll(error) {
+    for (const pending of this.pending.values()) { clearTimeout(pending.timeout); pending.reject(error); }
+    this.pending.clear();
+    for (const queued of this.queue) queued.reject(error);
+    this.queue = [];
+    this.active = null;
   }
 
   stop() {
     this.process?.kill();
     this.process = undefined;
+    this.failAll(new Error('Input bridge stopped'));
   }
 }
 

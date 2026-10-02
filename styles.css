@@ -146,6 +146,7 @@ body[data-shell-theme] .controls { padding: 7px 10px; border: 1px solid color-mi
 .captured-window header button[data-visual-mode][data-mode="theme"] { color: #8ff0ff; border-color: rgba(95,224,255,.72); background: rgba(32,173,218,.22); box-shadow: 0 0 14px rgba(65,211,255,.2); }
 .captured-window header button[data-visual-mode][data-mode="fx"] { color: #baa7ff; border-color: rgba(155,127,255,.45); background: rgba(107,78,211,.12); }
 .captured-window header button[data-visual-mode][data-mode="pass"] { color: #8ca1ac; background: rgba(25,42,51,.18); }
+.captured-window header button[data-visual-mode][data-mode="tint"] { color: var(--ink); border-color: var(--cyan); background: var(--cyan-soft); }
 .captured-window header button[data-front].active { color: #81f0b5; border-color: rgba(91,229,167,.65); background: rgba(32,173,112,.16); }
 .captured-window header button.release-app { color: #d795a1; border-color: rgba(255,111,133,.24); }
 .captured-window header button.release-app:hover { color: #ffb3bf; border-color: rgba(255,111,133,.58); background: rgba(201,46,72,.14); }
@@ -198,6 +199,10 @@ body[data-shell-theme] .controls { padding: 7px 10px; border: 1px solid color-mi
 .captured-window footer b { color: #67dda0; font-weight: 500; }
 .captured-window.clean::after, .captured-window.clean .capture-viewport::before, .captured-window.clean .capture-overlay { display: none; }
 .captured-window.clean .capture-viewport video { filter: saturate(.96) contrast(1.03) brightness(.96); }
+.captured-window.tint-enabled .capture-viewport video { filter: invert(1) hue-rotate(180deg) saturate(.55) contrast(1.08); }
+.captured-window.tint-enabled .capture-viewport::before { display: block; z-index: 2; opacity: .45; background: var(--cyan); mix-blend-mode: color; }
+.captured-window.tint-enabled .capture-viewport::after { border-color: var(--cyan); box-shadow: inset 0 0 40px var(--cyan-soft); }
+.captured-window.tint-enabled .capture-overlay { display: none; }
 .resize-grip { position: absolute; z-index: 12; right: 2px; bottom: 2px; width: 30px; height: 30px; cursor: nwse-resize; touch-action: none; background: linear-gradient(135deg, transparent 46%, rgba(95, 224, 255, .22) 47% 55%, transparent 56% 64%, rgba(95, 224, 255, .75) 65% 72%, transparent 73%); }
 .capture-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #8ea9b8; font-size: 12px; text-align: center; line-height: 1.6; }
 .capture-empty strong { display: block; color: var(--cyan); font-weight: 500; letter-spacing: .12em; }
@@ -254,6 +259,9 @@ article header b { font-size: 10px; color: var(--muted); font-weight: 400; }
 .agents strong { display: block; font-size: 13px; font-weight: 500; }
 .agents small { color: var(--muted); font-size: 10px; }
 .agents time { color: var(--muted); font-size: 10px; }
+.agents .agent-activity { display: block; padding: 0; }
+.agents .agent-activity > div { display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 10px; padding: 10px 0; }
+.agents .agent-activity .session-empty { color: var(--muted); font-size: 11px; }
 .blueprint { min-height: 220px; padding: 22px; display: grid; grid-template-columns: 1fr 1fr; align-items: center; }
 .blueprint .ship { font-size: 92px; color: var(--cyan); text-shadow: 0 0 26px rgba(72,213,255,.65); transform: rotate(-18deg); }
 .blueprint p { color: var(--cyan); letter-spacing: .25em; line-height: 1.8; font-size: 11px; }
@@ -431,19 +439,24 @@ body[data-shell-theme] .profile-themed .ax-wrapper {
   border: 1px solid var(--line);
   border-radius: min(var(--shell-radius), 12px);
   background: var(--shell-chrome) !important;
-  color: var(--ink);
+  color: var(--ink) !important;
+  -webkit-text-fill-color: var(--ink);
   font-family: var(--shell-font);
   font-weight: 500;
   letter-spacing: .015em;
-  padding: 4px 10px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  line-height: 1.15;
+  text-shadow: 0 1px 2px rgba(0,0,0,.45);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 2px 7px rgba(0,0,0,.18) !important;
   backdrop-filter: blur(12px);
 }
 body[data-shell-theme] .profile-themed .ax-wrapper:hover,
 body[data-shell-theme] .profile-themed .ax-wrapper:focus-visible { border-color: var(--cyan); outline: none; background: var(--shell-control-hover) !important; box-shadow: 0 0 0 2px var(--cyan-soft) !important; }
-body[data-shell-theme] .profile-themed .ax-wrapper[data-a2ui-component="TextField"] { border-color: var(--line) !important; border-bottom: 2px solid var(--cyan); background: var(--shell-control) !important; box-shadow: inset 0 2px 6px rgba(0,0,0,.22) !important; cursor: text; }
+body[data-shell-theme] .profile-themed .ax-wrapper[data-a2ui-component="TextField"] { display: block; border-color: var(--line) !important; border-bottom: 2px solid var(--cyan); background: var(--shell-control) !important; box-shadow: inset 0 2px 6px rgba(0,0,0,.22) !important; cursor: text; }
 body[data-shell-theme] .profile-themed .ax-wrapper[data-a2ui-component="Text"] { border: 0; background: var(--shell-control) !important; box-shadow: none !important; font-weight: 400; }
-body[data-shell-theme] .profile-themed .semantic-fx-region { border: 0; border-left: 1px solid var(--line); border-radius: min(var(--shell-radius), 10px); background: linear-gradient(90deg, var(--cyan-soft), transparent 12%) !important; box-shadow: none !important; opacity: .3; }
+body[data-shell-theme] .profile-themed .semantic-fx-region { border: 0; border-left: 2px solid var(--cyan); border-radius: min(var(--shell-radius), 10px); background: linear-gradient(90deg, var(--cyan-soft), transparent 35%) !important; box-shadow: inset 0 0 20px var(--cyan-soft) !important; opacity: .72; backdrop-filter: saturate(.7) contrast(1.1) brightness(.78); }
 body[data-shell-theme] .profile-themed .semantic-fx-region::after { display: none; }
 body[data-shell-theme="brass"] .profile-themed .ax-wrapper { border-color: #896137; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(255,207,136,.09), 0 2px 5px #100905 !important; }
 body[data-shell-theme="atomic"] .profile-themed .ax-wrapper { border-radius: 16px; border-color: #bb9660; }

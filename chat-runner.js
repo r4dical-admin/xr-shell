@@ -58,6 +58,8 @@ Allow-listed actions:
 - xr_shell_a2ui_apply: {messages:[A2UI messages], placement?}
 - xr_shell_a2ui_delete: {surfaceId}
 
+Placement guide: Current XR Shell state includes viewport and canvas sizes, each window's assigned slotX, x/y offsets, offsetLimits, centerX/centerY, dimensions, and floating surfaces. Treat x/y as offsets from that window's slot, not absolute screen coordinates. For a requested left/center/right layout, use the current canvas width and viewport width, keep window edges within the canvas, and account for window sizes and occupied centers. Adding an app changes all horizontal slots, so adjust windows after pulling the full set. If the state is unavailable, omit x/y instead of guessing large offsets.
+
 Current XR Shell state:
 ${state}
 

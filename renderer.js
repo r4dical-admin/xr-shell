@@ -147,7 +147,13 @@ const a2uiEvents = [];
 let a2uiEventSequence = 0;
 let a2uiFrontOrder = 0;
 let savedA2UIWidgets = [];
-try { sessions = JSON.parse(localStorage.getItem('xr-shell:sessions') || '[]'); } catch { sessions = []; }
+try {
+  sessions = JSON.parse(localStorage.getItem('xr-shell:sessions') || '[]');
+  if (!Array.isArray(sessions)) sessions = [];
+  for (const session of sessions) {
+    if (['starting', 'working', 'command_execution', 'tool_call'].includes(session.status)) session.status = 'interrupted';
+  }
+} catch { sessions = []; }
 try {
   const saved = JSON.parse(localStorage.getItem('xr-shell:a2ui-widgets') || '[]');
   savedA2UIWidgets = Array.isArray(saved) ? saved.slice(0, 50) : [];
@@ -253,7 +259,7 @@ async function captureWindow(source, profileName = source?.name) {
   bindSpatialControls(source.id, panel);
   bindProfileControls(source.id, panel);
   panel.querySelector('[data-visual-mode]').addEventListener('click', () => {
-    const modes = panel.xrTheme ? ['theme', 'fx', 'pass'] : ['fx', 'pass'];
+    const modes = panel.xrTheme ? ['theme', 'tint', 'fx', 'pass'] : ['tint', 'fx', 'pass'];
     const currentIndex = Math.max(0, modes.indexOf(panel.visualMode));
     setVisualMode(panel, modes[(currentIndex + 1) % modes.length]);
   });
@@ -376,7 +382,7 @@ function themePreferenceKey(theme) {
 function readThemePreference(theme) {
   try {
     const saved = JSON.parse(localStorage.getItem(themePreferenceKey(theme)) || '{}');
-    const mode = ['theme', 'fx', 'pass'].includes(saved.mode) ? saved.mode : saved.enabled === false ? 'fx' : 'theme';
+    const mode = ['theme', 'tint', 'fx', 'pass'].includes(saved.mode) ? saved.mode : saved.enabled === false ? 'fx' : 'theme';
     return { intensity: clamp(Number(saved.intensity) || 72, 15, 100), mode };
   } catch { return { intensity: 72, mode: 'theme' }; }
 }
@@ -415,20 +421,23 @@ function setThemeIntensity(panel, value, persist = true) {
 }
 
 function setVisualMode(panel, requestedMode, persist = true) {
-  const mode = requestedMode === 'theme' && !panel.xrTheme ? 'fx' : ['theme', 'fx', 'pass'].includes(requestedMode) ? requestedMode : 'fx';
+  const mode = requestedMode === 'theme' && !panel.xrTheme ? 'tint' : ['theme', 'tint', 'fx', 'pass'].includes(requestedMode) ? requestedMode : 'fx';
   panel.visualMode = mode;
   panel.classList.toggle('profile-themed', mode === 'theme');
   panel.classList.toggle('theme-semantic', mode === 'theme');
   panel.classList.toggle('fx-enabled', mode === 'fx');
+  panel.classList.toggle('tint-enabled', mode === 'tint');
   panel.classList.toggle('clean', mode === 'pass');
   const button = panel.querySelector('[data-visual-mode]');
   button.dataset.mode = mode;
-  button.textContent = mode === 'theme' ? 'THEME' : mode === 'pass' ? 'PASS' : 'FX';
+  button.textContent = { theme: 'THEME', tint: 'TINT', fx: 'FX', pass: 'PASS' }[mode];
   button.title = mode === 'theme'
-    ? `${panel.xrTheme.name} · ${intensityDescription(panel.themeIntensity || 60)} ${Math.round(panel.themeIntensity || 60)}% · click for FX`
-    : mode === 'fx' ? 'Generic holographic FX · click for passthrough' : `Passthrough view · click for ${panel.xrTheme ? 'theme' : 'FX'}`;
+    ? `${panel.xrTheme.name} · ${intensityDescription(panel.themeIntensity || 60)} ${Math.round(panel.themeIntensity || 60)}% · click for inverse tint`
+    : mode === 'tint' ? 'Invert bright app areas and tint to match the shell · click for FX'
+    : mode === 'fx' ? 'Generic holographic FX · click for passthrough' : `Passthrough view · click for ${panel.xrTheme ? 'theme' : 'inverse tint'}`;
   panel.querySelector('.capture-title small').textContent = mode === 'theme'
     ? `${String(panel.xrTheme.name || 'XR PROFILE').toUpperCase()} · THEME`
+    : mode === 'tint' ? 'INVERSE APP VIEW · SHELL TINT'
     : mode === 'fx' ? 'HOLOGRAPHIC WINDOW LINK · FX' : 'ORIGINAL APP VIEW · PASSTHROUGH';
   trackingState.textContent = `${panel.xrTheme?.name || 'App'} · ${mode === 'pass' ? 'passthrough' : mode} mode`;
   if (persist) saveThemePreference(panel);
@@ -1160,7 +1169,7 @@ function createSemanticWrapper(panel, element, changed) {
   } else {
     node = document.createElement(element.semanticMode === 'a2ui-text' ? 'span' : 'button');
     if (node.tagName === 'BUTTON') node.type = 'button';
-    node.textContent = label.slice(0, 80);
+    node.textContent = (label || element.role.replace(/^AX/, '')).slice(0, 80);
     node.dataset.a2uiComponent = element.semanticMode === 'a2ui-text' ? 'Text' : 'DirectOverlay';
   }
   const effect = String(panel.xrTheme?.roleEffects?.[element.role] || '').replace(/[^a-z0-9-]/g, '');
@@ -1288,12 +1297,23 @@ function layoutCapturedWindows() {
 }
 
 function capturedLayoutItem(sourceId, captured) {
+  const slotIndex = Number(captured.panel.dataset.slot || 0);
+  const slots = window.XR_WINDOW_LAYOUT.horizontalSlots(capturedWindows.size, virtualScale);
+  const slotX = Math.round((slots[slotIndex] || 0) * window.innerWidth / 100);
+  const x = Number(captured.panel.dataset.offsetX || 0);
+  const y = Number(captured.panel.dataset.offsetY || 0);
   return {
     sourceId,
     name: captured.source?.name || captured.panel.querySelector('.capture-title span')?.textContent || 'App',
     active: sourceId === activeCaptureId,
-    x: Number(captured.panel.dataset.offsetX || 0),
-    y: Number(captured.panel.dataset.offsetY || 0),
+    x, y,
+    slotX,
+    centerX: Math.round(appStage.clientWidth / 2 + slotX + x),
+    centerY: Math.round(appStage.clientHeight / 2 + y),
+    offsetLimits: {
+      x: Math.round(appStage.clientWidth * .42),
+      y: Math.round(Math.max(0, (appStage.clientHeight - captured.panel.offsetHeight) / 2 - 8))
+    },
     width: captured.panel.offsetWidth,
     height: captured.panel.offsetHeight,
     visualMode: captured.panel.visualMode || 'fx',
@@ -1310,7 +1330,15 @@ function resolveCapturedApp(params = {}) {
 }
 
 async function handleAgentControl(method, params = {}) {
-  if (method === 'get_layout') return { activeSourceId: activeCaptureId, windows: [...capturedWindows.entries()].map(([id, captured]) => capturedLayoutItem(id, captured)) };
+  if (method === 'get_layout') return {
+    activeSourceId: activeCaptureId,
+    viewport: { width: viewport.clientWidth, height: viewport.clientHeight },
+    canvas: { width: appStage.clientWidth, height: appStage.clientHeight, scaleX: virtualScale, scaleY: virtualHeightScale,
+      offsetOrigin: 'canvas center', centerOrigin: 'canvas top-left', xDirection: 'right', yDirection: 'down' },
+    placement: 'Window x/y are pixel offsets from the assigned horizontal slot, bounded by offsetLimits. centerX/centerY are actual canvas coordinates. New windows change existing slots.',
+    windows: [...capturedWindows.entries()].map(([id, captured]) => capturedLayoutItem(id, captured)),
+    surfaces: window.XR_A2UI.summarize(a2uiStore)
+  };
   if (method === 'a2ui_capabilities') return {
     version: window.XR_A2UI.VERSION,
     supportedCatalogIds: [window.XR_A2UI.BASIC_CATALOG, window.XR_A2UI.XR_CATALOG],
@@ -1499,17 +1527,15 @@ function bindCapturedInput(sourceId, panel) {
   });
 
   surface.addEventListener('pointerup', (event) => {
-    if (!inputEnabled) return;
     const video = surface.querySelector('video');
     const point = video && mediaPoint(event, video, true);
-    if (!point) return;
-    if (gesture?.dragging) {
+    if (inputEnabled && point && gesture?.dragging) {
       window.horizon.sendInput({ sourceId, type: 'pointer', phase: 'up', button: gesture.button, ...point });
-    } else {
+    } else if (inputEnabled && point && gesture) {
       window.horizon.sendInput({ sourceId, type: 'activate', button: gesture?.button ?? event.button, clickCount: gesture?.clickCount || event.detail, ...(gesture?.startPoint || point) });
     }
     gesture = null;
-    updateXRCursor(surface, video, point, false);
+    if (video && point) updateXRCursor(surface, video, point, false);
     if (surface.hasPointerCapture(event.pointerId)) surface.releasePointerCapture(event.pointerId);
   });
   surface.addEventListener('pointerleave', () => {
@@ -1562,6 +1588,30 @@ function relativeSessionTime(timestamp) {
 }
 
 function renderSessions() {
+  const active = sessions.filter((session) => ['starting', 'working', 'command_execution', 'tool_call'].includes(session.status));
+  document.getElementById('agent-count').textContent = String(active.length);
+  const activity = document.getElementById('agent-activity');
+  activity.replaceChildren();
+  for (const session of active.slice(0, 4)) {
+    const row = document.createElement('div');
+    const light = document.createElement('i');
+    const copy = document.createElement('p');
+    const name = document.createElement('strong');
+    const detail = document.createElement('small');
+    const time = document.createElement('time');
+    name.textContent = session.title;
+    detail.textContent = session.status.replaceAll('_', ' ');
+    time.textContent = relativeSessionTime(session.updatedAt);
+    copy.append(name, detail);
+    row.append(light, copy, time);
+    activity.append(row);
+  }
+  if (!active.length) {
+    const empty = document.createElement('p');
+    empty.className = 'session-empty';
+    empty.textContent = 'No agents running';
+    activity.append(empty);
+  }
   sessionList.replaceChildren();
   if (!sessions.length) {
     const empty = document.createElement('p');
@@ -1972,6 +2022,8 @@ window.horizon.onInputError((error) => {
     trackingState.textContent = 'Accessibility permission is required for app input';
   } else if (error === 'source-window-unavailable') {
     trackingState.textContent = 'Original app window is no longer available';
+  } else if (error) {
+    trackingState.textContent = `App input interrupted · ${error}`;
   }
 });
 window.horizon.onControlRequest(async ({ id, method, params }) => {

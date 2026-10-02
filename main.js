@@ -21,6 +21,8 @@ let controlSequence = 0;
 const controlPending = new Map();
 const PROFILE_DURATION_MS = Math.max(10000, Number(process.env.XR_PROFILE_DURATION_MS) || 60 * 1000);
 const inputBridge = new InputBridge();
+const inspectionBridge = new InputBridge();
+const statusBridge = new InputBridge();
 const profileStore = new ProfileStore(path.join(__dirname, 'integration-profiles'));
 const profilers = new Map();
 const CHAT_BACKEND = parseBackend(process.argv);
@@ -154,7 +156,7 @@ async function handleControlRequest(method, params = {}) {
       requestRendererControl('get_layout').catch(() => ({ windows: [], activeSourceId: null }))
     ]);
     const captured = new Set((layout.windows || []).map((item) => item.sourceId));
-    return { apps: apps.map((item) => ({ ...item, captured: captured.has(item.id) })), ...layout };
+    return { ...layout, apps: apps.map((item) => ({ ...item, captured: captured.has(item.id) })) };
   }
   return requestRendererControl(method, params);
 }
@@ -162,7 +164,7 @@ async function handleControlRequest(method, params = {}) {
 async function snapshotForSource(sourceId) {
   const windowId = sourceWindowId(sourceId);
   if (windowId === null) return { ok: false, error: 'invalid-window-source' };
-  return inputBridge.request({ type: 'snapshot', windowId });
+  return inspectionBridge.request({ type: 'snapshot', windowId });
 }
 
 function stopProfiler(sourceId) {
@@ -319,13 +321,13 @@ app.whenReady().then(() => {
   });
   themeAgent = new ThemeAgent({ homeDirectory: app.getPath('home'), workingDirectory: __dirname });
   ipcMain.handle('app:preview-mode', () => process.env.HORIZON_CAPTURE === '1');
-  ipcMain.handle('input:status', () => inputBridge.request({ type: 'status', prompt: false }));
-  ipcMain.handle('input:enable', () => inputBridge.request({ type: 'status', prompt: true }));
+  ipcMain.handle('input:status', () => statusBridge.request({ type: 'status', prompt: false }));
+  ipcMain.handle('input:enable', () => statusBridge.request({ type: 'status', prompt: true }));
   ipcMain.handle('input:open-settings', () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'));
   ipcMain.handle('app:launch', (_event, params) => launchApplicationWindow(params || {}));
   ipcMain.handle('menu:snapshot', async (_event, sourceId) => {
     const windowId = sourceWindowId(sourceId);
-    return windowId === null ? { ok: false, error: 'invalid-window-source' } : inputBridge.request({ type: 'menu-snapshot', windowId });
+    return windowId === null ? { ok: false, error: 'invalid-window-source' } : inspectionBridge.request({ type: 'menu-snapshot', windowId });
   });
   ipcMain.handle('menu:activate', async (_event, sourceId, rawPath) => {
     const windowId = sourceWindowId(sourceId);
@@ -333,7 +335,7 @@ app.whenReady().then(() => {
     if (windowId === null || !menuPath.length || menuPath.length > 8 || menuPath.some((value) => !Number.isInteger(value) || value < 0 || value > 500)) {
       return { ok: false, error: 'invalid-menu-path' };
     }
-    return inputBridge.request({ type: 'menu-activate', windowId, path: menuPath });
+    return inspectionBridge.request({ type: 'menu-activate', windowId, path: menuPath });
   });
   ipcMain.handle('profile:toggle', async (_event, sourceId, enabled) => {
     if (!enabled) {
@@ -374,7 +376,9 @@ app.whenReady().then(() => {
     if (!command) return;
     inputBridge.request(command).then((result) => {
       if (!result.ok && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('input:error', result.error);
-    }).catch(() => {});
+    }).catch((error) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('input:error', error.message);
+    });
   });
   ipcMain.handle('display:list', () => displays());
   ipcMain.handle('capture:permission', () => process.platform === 'darwin'
@@ -387,7 +391,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('window:metrics', (_event, sourceId) => {
     const windowId = sourceWindowId(sourceId);
-    return windowId === null ? { ok: false, error: 'invalid-window-source' } : inputBridge.request({ type: 'window-metrics', windowId });
+    return windowId === null ? { ok: false, error: 'invalid-window-source' } : inspectionBridge.request({ type: 'window-metrics', windowId });
   });
   ipcMain.on('control:response', (_event, response) => {
     const pending = controlPending.get(response?.id);
@@ -430,6 +434,8 @@ app.on('window-all-closed', () => {
   for (const sourceId of profilers.keys()) stopProfiler(sourceId);
   tracker.stop(false);
   inputBridge.stop();
+  inspectionBridge.stop();
+  statusBridge.stop();
   if (process.platform !== 'darwin') app.quit();
 });
 

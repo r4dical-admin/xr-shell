@@ -83,11 +83,9 @@
         </section>
 
         <section class="zone zone-mid-right">
-          <article class="glass agents">
-            <header><span>ACTIVE AGENTS</span><b>3</b></header>
-            <div><i class="cyan"></i><p><strong>Developer</strong><small>Working on feature branch…</small></p><time>2m</time></div>
-            <div><i class="violet"></i><p><strong>Researcher</strong><small>Searching and summarizing…</small></p><time>5m</time></div>
-            <div><i class="green"></i><p><strong>Planner</strong><small>Breaking down next steps…</small></p><time>1m</time></div>
+          <article class="glass sessions">
+            <header><span id="session-heading">CODEX SESSIONS</span><button id="new-session" type="button">＋ NEW SESSION</button></header>
+            <div id="session-list" class="session-list"></div>
           </article>
           <article class="glass system-card">
             <small>TRACKING PIPELINE</small>
@@ -98,9 +96,9 @@
 
         <section class="zone zone-right">
           <article class="glass blueprint"><div class="ship">◇</div><p>EXPLORE<br />BUILD<br />LEARN<br />REPEAT</p></article>
-          <article class="glass sessions">
-            <header><span id="session-heading">CODEX SESSIONS</span><button id="new-session" type="button">＋ NEW SESSION</button></header>
-            <div id="session-list" class="session-list"></div>
+          <article class="glass agents">
+            <header><span>ACTIVE AGENTS</span><b id="agent-count">0</b></header>
+            <div id="agent-activity" class="agent-activity"></div>
           </article>
         </section>
       </div>
