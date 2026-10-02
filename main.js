@@ -10,12 +10,9 @@ const { InputBridge } = require('./input-bridge');
 const { ProfileStore, diffSnapshots } = require('./profile-store');
 const { ProfileObserver } = require('./profile-observer');
 const { ChatRunner, parseBackend } = require('./chat-runner');
-const { ThemeAgent } = require('./theme-agent');
-const { compileTheme } = require('./theme-engine');
 
 let mainWindow;
 let chatRunner;
-let themeAgent;
 let controlServer;
 let controlSequence = 0;
 const controlPending = new Map();
@@ -204,7 +201,6 @@ async function captureProfilerUpdate(sourceId, state) {
     update.events.push(...rawEvents);
     const saved = profileStore.save(update, update.events);
     update.profilePath = saved.outputPath;
-    update.theme = saved.profile.xrTheme;
     state.previous = update;
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('profile:update', { sourceId, snapshot: update, events: update.events, profilePath: update.profilePath });
@@ -232,16 +228,8 @@ async function finishProfiler(sourceId) {
     return finalCapture || { ok: false, error: 'final-profile-capture-failed' };
   }
   const { profile, outputPath } = finalCapture.saved;
-  sendProfileStatus(sourceId, { stage: 'generating', appName: profile.app.name, eventCount: profile.eventPatterns?.total || 0 });
-  try {
-    const theme = await themeAgent.generate(profile);
-    profileStore.installTheme(profile.app.bundleId, theme);
-    sendProfileStatus(sourceId, { stage: 'complete', appName: profile.app.name, eventCount: profile.eventPatterns?.total || 0, theme, profilePath: outputPath });
-    return { ok: true, theme, profilePath: outputPath };
-  } catch (error) {
-    sendProfileStatus(sourceId, { stage: 'complete', appName: profile.app.name, eventCount: profile.eventPatterns?.total || 0, theme: profile.xrTheme, profilePath: outputPath, fallback: true, error: error.message });
-    return { ok: true, theme: profile.xrTheme, profilePath: outputPath, fallback: true };
-  }
+  sendProfileStatus(sourceId, { stage: 'complete', appName: profile.app.name, eventCount: profile.eventPatterns?.total || 0, profilePath: outputPath });
+  return { ok: true, profilePath: outputPath };
 }
 
 async function startProfiler(sourceId) {
@@ -250,7 +238,6 @@ async function startProfiler(sourceId) {
   if (!initial.ok) return initial;
   const initialSaved = profileStore.save(initial, initial.events);
   initial.profilePath = initialSaved.outputPath;
-  initial.theme = initialSaved.profile.xrTheme;
   const state = { previous: initial, busy: false, finalizing: false, timer: null, deadlineTimer: null, rawEvents: [], supportedNotifications: [], observer: null, startedAt: Date.now() };
   state.observer = new ProfileObserver(sourceWindowId(sourceId), (event) => {
     if (event.ready) {
@@ -319,7 +306,6 @@ app.whenReady().then(() => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:event', event);
     }
   });
-  themeAgent = new ThemeAgent({ homeDirectory: app.getPath('home'), workingDirectory: __dirname });
   ipcMain.handle('app:preview-mode', () => process.env.HORIZON_CAPTURE === '1');
   ipcMain.handle('input:status', () => statusBridge.request({ type: 'status', prompt: false }));
   ipcMain.handle('input:enable', () => statusBridge.request({ type: 'status', prompt: true }));
@@ -344,25 +330,12 @@ app.whenReady().then(() => {
     }
     return startProfiler(sourceId);
   });
-  ipcMain.handle('profile:theme-for-app', (_event, appName) => profileStore.themeForAppName(String(appName || '').slice(0, 300)));
   ipcMain.handle('profile:list', () => profileStore.list());
   ipcMain.handle('profile:details', (_event, bundleId, kind) => profileStore.details(String(bundleId || '').slice(0, 300), kind === 'recording' ? 'recording' : 'profile'));
-  ipcMain.handle('profile:regenerate', async (_event, bundleId) => {
+  ipcMain.handle('profile:delete', (_event, bundleId) => {
     const safeBundleId = String(bundleId || '').slice(0, 300);
     stopProfilersForBundleId(safeBundleId);
-    const profile = profileStore.details(safeBundleId, 'profile');
-    if (!profile) return { ok: false, error: 'profile-not-found' };
-    const hasRecording = Boolean((profile.latestLayout || []).length || Number(profile.eventPatterns?.total));
-    if (!hasRecording) return { ok: false, error: 'recording-required' };
-    try {
-      const theme = await themeAgent.generate(profile);
-      profileStore.installTheme(safeBundleId, theme);
-      return { ok: true, theme, app: profile.app, fallback: false };
-    } catch (error) {
-      const theme = compileTheme(profile);
-      profileStore.installTheme(safeBundleId, theme);
-      return { ok: true, theme, app: profile.app, fallback: true, warning: error.message };
-    }
+    return { ok: profileStore.delete(safeBundleId) };
   });
   ipcMain.handle('profile:recording-delete', (_event, bundleId) => {
     const safeBundleId = String(bundleId || '').slice(0, 300);
@@ -430,7 +403,6 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   chatRunner?.stopAll();
-  themeAgent?.stopAll();
   for (const sourceId of profilers.keys()) stopProfiler(sourceId);
   tracker.stop(false);
   inputBridge.stop();

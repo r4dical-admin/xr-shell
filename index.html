@@ -16,7 +16,7 @@
         <select id="window-picker" aria-label="Application window"><option value="">Choose an app window…</option></select>
         <button id="refresh-windows" aria-label="Refresh application windows" title="Refresh application windows">↻</button>
         <button id="add-window">Add app</button>
-        <button id="open-profiles">Profiles</button>
+        <button id="open-shortcuts">Shortcuts</button>
         <button id="open-widgets">Widgets</button>
         <select id="shell-theme-picker" aria-label="XR Shell theme" title="Change XR Shell theme">
           <option value="horizon">Horizon Glass</option>
@@ -117,20 +117,21 @@
       <span class="hint">Right-drag or use ← → to simulate head movement</span>
     </footer>
 
-    <dialog id="theme-intensity-dialog" class="xr-dialog intensity-dialog">
-      <header><div><small>GENERATED APP THEME</small><h2 id="intensity-title">Choose reskin intensity</h2></div><button type="button" data-intensity-close aria-label="Close">×</button></header>
-      <p>Choose how many semantic UI levels XR Shell replaces. Safe controls are wrapped first; complex regions retain their live surface with localized FX.</p>
-      <label class="intensity-control"><span>Level 1</span><input id="theme-intensity" type="range" min="20" max="100" value="60" step="20" /><span>Level 5</span></label>
-      <output id="theme-intensity-label">Level 3/5</output>
-      <footer><button type="button" data-intensity-off>Use passthrough</button><button type="button" class="primary" data-intensity-apply>Apply reskin</button></footer>
-    </dialog>
-
-    <dialog id="profile-library" class="xr-dialog profile-library">
-      <header><div><small>LOCAL INTEGRATION DATA</small><h2>App profiles & recordings</h2></div><button type="button" data-library-close aria-label="Close">×</button></header>
-      <p>Profiles contain reusable capabilities and themes. Recordings contain the learned AX layout and event summary.</p>
-      <div class="library-layout">
-        <div id="profile-library-list" class="profile-library-list"></div>
-        <pre id="profile-library-detail">Select View profile or View recording to inspect its local JSON.</pre>
+    <dialog id="shortcuts-dialog" class="xr-dialog shortcuts-dialog">
+      <header><div><small>XR SHELL CONTROLS</small><h2>Keyboard shortcuts</h2></div><button type="button" data-shortcuts-close aria-label="Close">×</button></header>
+      <div class="shortcuts-content">
+        <section><h3>Workspace</h3><dl>
+          <div><dt><kbd>0</kbd></dt><dd>Recenter the XR workspace</dd></div>
+          <div><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Pan horizontally without head tracking</dd></div>
+          <div><dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Pan vertically without head tracking</dd></div>
+          <div><dt>Right-drag</dt><dd>Look around with a mouse</dd></div>
+        </dl></section>
+        <section><h3>Captured apps</h3><dl>
+          <div><dt>Click app</dt><dd>Select a captured window and send mouse input</dd></div>
+          <div><dt>Type / <kbd>⌘</kbd> shortcuts</dt><dd>Forward keys to the selected app</dd></div>
+          <div><dt>Drag title / corner</dt><dd>Move or resize the XR wrapper</dd></div>
+        </dl></section>
+        <section class="shortcuts-permission"><h3>App input</h3><p id="shortcuts-input-status">Checking Accessibility access…</p><p>If XR Shell was started with <code>npm start</code>, macOS may list <strong>Terminal</strong> as the app to enable in Privacy &amp; Security → Accessibility. If started another way, enable the listed host app or <code>input-bridge</code>.</p><button type="button" id="shortcuts-open-accessibility">Open Accessibility Settings</button></section>
       </div>
     </dialog>
 
@@ -141,7 +142,6 @@
     </dialog>
     <script src="a2ui-runtime.js"></script>
     <script src="window-layout.js"></script>
-    <script src="semantic-theme.js"></script>
     <script src="renderer.js"></script>
   </body>
 </html>

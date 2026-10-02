@@ -54,7 +54,7 @@ test('event aggregation preserves useful interaction frequencies without labels 
   assert.equal(JSON.stringify(patterns).includes('secret'), false);
 });
 
-test('profile library can inspect and clear recordings without deleting the theme', () => {
+test('profile library can inspect and clear recordings without deleting capabilities', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'xr-shell-profiles-'));
   const store = new ProfileStore(directory);
   store.save(base, [{ type: 'AXPressed', role: 'AXButton', at: 1000 }]);
@@ -62,30 +62,24 @@ test('profile library can inspect and clear recordings without deleting the them
   assert.equal(summary.bundleId, 'com.example.Editor');
   assert.equal(summary.hasRecording, true);
   assert.equal(store.details(summary.bundleId, 'recording').eventPatterns.total, 1);
-  const theme = store.details(summary.bundleId).xrTheme;
   assert.equal(store.clearRecording(summary.bundleId), true);
   assert.equal(store.details(summary.bundleId, 'recording').eventPatterns.total, 0);
-  assert.deepEqual(store.details(summary.bundleId).xrTheme, theme);
+  assert.equal(store.details(summary.bundleId).capabilities.roles.AXButton, 1);
   assert.equal(store.delete(summary.bundleId), true);
   assert.deepEqual(store.list(), []);
 });
 
-test('regenerating a reskin replaces only the theme and preserves its AX recording', () => {
+test('recording updates preserve historical theme data without generating new themes', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'xr-shell-profiles-'));
   const store = new ProfileStore(directory);
   store.save(base, [{ type: 'AXPressed', role: 'AXButton', at: 1000 }]);
-  const replacement = {
-    version: 2,
-    name: 'Editor regenerated',
-    motif: 'terminal',
-    palette: { surface: '#031019', ink: '#e8fbff', accent: '#37e7ff', secondary: '#9b7cff', line: '#57dfff' },
-    videoFilter: 'saturate(1.1) contrast(1.12) brightness(.9)',
-    roleEffects: { AXButton: 'holographic-control' }
-  };
-  store.installTheme(base.app.bundleId, replacement);
+  const legacy = store.details(base.app.bundleId);
+  legacy.xrTheme = { version: 2, name: 'Archived editor reskin' };
+  fs.writeFileSync(path.join(directory, 'com.example.Editor.json'), JSON.stringify(legacy));
+  store.save({ ...base, capturedAt: 2000 }, [{ type: 'AXFocused', role: 'AXButton', at: 2000 }]);
   const profile = store.details(base.app.bundleId);
-  assert.deepEqual(profile.xrTheme, replacement);
+  assert.deepEqual(profile.xrTheme, legacy.xrTheme);
   assert.equal(profile.latestLayout.length, 1);
-  assert.equal(profile.eventPatterns.total, 1);
+  assert.equal(profile.eventPatterns.total, 2);
   assert.equal(store.list()[0].hasRecording, true);
 });

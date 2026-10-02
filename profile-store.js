@@ -2,7 +2,6 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { compileTheme } = require('./theme-engine');
 
 function safeName(value) {
   return String(value || 'unknown-app').replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 120);
@@ -103,7 +102,7 @@ function summarizeSnapshot(snapshot, existing = null, events = []) {
     },
     eventPatterns: aggregateEvents(existing?.eventPatterns, events),
     roleSamples: { ...(existing?.roleSamples || {}), ...samples },
-    xrTheme: existing?.xrTheme?.version >= 2 ? existing.xrTheme : compileTheme({ app: snapshot.app, capabilities: { roles } }),
+    ...(existing?.xrTheme ? { xrTheme: existing.xrTheme } : {}),
     latestLayout: (snapshot.elements || []).map((element) => ({
       id: element.id,
       role: element.role,
@@ -132,31 +131,6 @@ class ProfileStore {
     return { profile, outputPath };
   }
 
-  themeForAppName(appName) {
-    let filenames = [];
-    try { filenames = fs.readdirSync(this.directory).filter((name) => name.endsWith('.json')); } catch { return null; }
-    const requested = String(appName || '').toLowerCase();
-    for (const filename of filenames) {
-      try {
-        const profile = JSON.parse(fs.readFileSync(path.join(this.directory, filename), 'utf8'));
-        const known = String(profile.app?.name || '').toLowerCase();
-        if (known && (requested.includes(known) || known.includes(requested))) {
-          return profile.xrTheme?.version >= 2 ? profile.xrTheme : compileTheme(profile);
-        }
-      } catch { /* skip malformed profile */ }
-    }
-    return null;
-  }
-
-  installTheme(bundleId, theme) {
-    const outputPath = path.join(this.directory, `${safeName(bundleId)}.json`);
-    const profile = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
-    profile.xrTheme = theme;
-    profile.updatedAt = new Date().toISOString();
-    fs.writeFileSync(outputPath, `${JSON.stringify(profile, null, 2)}\n`);
-    return { profile, outputPath };
-  }
-
   entries() {
     let filenames = [];
     try { filenames = fs.readdirSync(this.directory).filter((name) => name.endsWith('.json')); } catch { return []; }
@@ -176,8 +150,6 @@ class ProfileStore {
       bundleId: profile.app.bundleId,
       name: profile.app.name,
       updatedAt: profile.updatedAt,
-      themeName: profile.xrTheme?.name || null,
-      themeVersion: profile.xrTheme?.version || null,
       roleCount: Object.keys(profile.capabilities?.roles || {}).length,
       nodeCount: (profile.latestLayout || []).length,
       eventCount: Number(profile.eventPatterns?.total) || 0,

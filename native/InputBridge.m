@@ -467,9 +467,12 @@ static BOOL ActivateAtPoint(pid_t pid, CGPoint point, NSInteger button, uint32_t
     if (!WindowDetails(windowID, &verifiedPID, &bounds) || verifiedPID != pid) return NO;
     AXUIElementRef application = AXUIElementCreateApplication(pid);
     AXUIElementSetMessagingTimeout(application, 0.8);
-    AXUIElementRef window = BestAccessibilityWindow(application, bounds);
-    AXUIElementRef hit = window ? CopyDeepestElementAtPoint(window, point, 0) : NULL;
-    if (window) CFRelease(window);
+    AXUIElementRef hit = NULL;
+    if (AXUIElementCopyElementAtPosition(application, point.x, point.y, &hit) != kAXErrorSuccess || !hit) {
+        AXUIElementRef window = BestAccessibilityWindow(application, bounds);
+        hit = window ? CopyDeepestElementAtPoint(window, point, 0) : NULL;
+        if (window) CFRelease(window);
+    }
     CFRelease(application);
     if (!hit) return NO;
 
@@ -738,9 +741,11 @@ int main(int argc, const char *argv[]) {
                 BOOL ok = NO;
                 if ([type isEqualToString:@"pointer"]) ok = PostPointer(command, pid, point, [command[@"windowId"] unsignedIntValue]);
                 else if ([type isEqualToString:@"activate"]) {
-                    RaiseTargetWindow([command[@"windowId"] unsignedIntValue]);
                     ok = ActivateAtPoint(pid, point, [command[@"button"] integerValue], [command[@"windowId"] unsignedIntValue]);
-                    if (!ok) ok = FallbackClick(command, pid, point, [command[@"windowId"] unsignedIntValue]);
+                    if (!ok) {
+                        RaiseTargetWindow([command[@"windowId"] unsignedIntValue]);
+                        ok = FallbackClick(command, pid, point, [command[@"windowId"] unsignedIntValue]);
+                    }
                 }
                 else if ([type isEqualToString:@"scroll"]) { RaiseTargetWindow([command[@"windowId"] unsignedIntValue]); ok = PostScroll(command, pid, point); }
                 else if ([type isEqualToString:@"text"]) { RaiseTargetWindow([command[@"windowId"] unsignedIntValue]); ok = PostText(command, pid); }

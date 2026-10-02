@@ -6,7 +6,6 @@
   "main": "main.js",
   "scripts": {
     "build:input-bridge": "node scripts/build-input-bridge.js",
-    "build:themes": "node scripts/build-profile-themes.js",
     "prestart": "npm run build:input-bridge",
     "start": "electron .",
     "capture": "HORIZON_CAPTURE=1 electron .",
