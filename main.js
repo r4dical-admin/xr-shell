@@ -3,19 +3,23 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
-const { app, BrowserWindow, desktopCapturer, ipcMain, screen, shell, systemPreferences } = require('electron');
+const { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, shell, systemPreferences } = require('electron');
 const { ControlServer } = require('./control-server');
+const { progressSocketPath, PROGRESS_METHODS } = require('./progress-socket');
 const { HeadTracker } = require('./tracking');
 const { InputBridge } = require('./input-bridge');
 const { ProfileStore, diffSnapshots } = require('./profile-store');
 const { ProfileObserver } = require('./profile-observer');
 const { ChatRunner, parseBackend } = require('./chat-runner');
+const { ScriptRunner, scriptRequest } = require('./script-runner');
 
 let mainWindow;
 let chatRunner;
 let controlServer;
+let progressServer;
 let controlSequence = 0;
 const controlPending = new Map();
+const scriptRunner = new ScriptRunner();
 const PROFILE_DURATION_MS = Math.max(10000, Number(process.env.XR_PROFILE_DURATION_MS) || 60 * 1000);
 const inputBridge = new InputBridge();
 const inspectionBridge = new InputBridge();
@@ -132,6 +136,29 @@ async function launchApplicationWindow(params = {}) {
   throw new Error('Application launched, but no capturable window appeared before the timeout');
 }
 
+function openTerminalLauncher(launcherPath) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('/usr/bin/open', ['-a', 'Terminal', launcherPath], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let errorText = '';
+    child.stderr.on('data', (chunk) => { errorText = `${errorText}${chunk}`.slice(-1200); });
+    child.once('error', reject);
+    child.once('exit', (code) => code === 0 ? resolve() : reject(new Error(errorText.trim() || `Could not open Terminal (${code})`)));
+  });
+}
+
+async function waitForNewWindow(previousIds, runId, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const windows = await availableApplicationWindows(false);
+    const tagged = windows.find((source) => source.name.includes(runId));
+    if (tagged) return tagged;
+    const fresh = windows.find((source) => !previousIds.has(source.id));
+    if (fresh) return fresh;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  return null;
+}
+
 function requestRendererControl(method, params = {}) {
   if (!mainWindow || mainWindow.isDestroyed()) return Promise.reject(new Error('XR Shell window is not ready'));
   const id = ++controlSequence;
@@ -147,6 +174,35 @@ function requestRendererControl(method, params = {}) {
 }
 
 async function handleControlRequest(method, params = {}) {
+  if (method === 'script_status') return scriptRunner.status(params.runId);
+  if (method === 'run_script') {
+    const request = scriptRequest(params);
+    if (request.jobId) {
+      let { job } = await requestRendererControl('progress_get', { jobId: request.jobId });
+      if (!job) ({ job } = await handleControlRequest('progress_prepare', { jobId: request.jobId, title: params.title }));
+      if (job.status === 'running') throw new Error('This progress job is already running');
+    }
+    const choice = await dialog.showMessageBox(mainWindow, {
+      type: 'warning', buttons: ['Cancel', 'Run Script'], defaultId: 0, cancelId: 0, noLink: true,
+      title: 'XR Shell script approval', message: 'Allow XR Shell to run this local script?',
+      detail: `Script: ${request.scriptPath}\nArguments: ${JSON.stringify(request.args)}\nDisplay: ${request.display === 'terminal' ? 'macOS Terminal, attached to XR Shell' : 'background'}\nProgress: ${request.jobId || 'none'}\n\nThis script will run with your macOS user permissions.`
+    });
+    if (choice.response !== 1) throw new Error('Script launch cancelled');
+    if (request.display === 'background') return scriptRunner.launch(request);
+    const previousIds = new Set((await availableApplicationWindows(false)).map((source) => source.id));
+    const run = await scriptRunner.launchTerminal(request, openTerminalLauncher);
+    const source = await waitForNewWindow(previousIds, run.runId);
+    if (!source) return { ...run, warning: 'Terminal opened, but XR Shell could not find its new window to attach' };
+    try {
+      await requestRendererControl('pull_app', { sourceId: source.id });
+      if ([params.x, params.y, params.width, params.height].some((value) => value !== undefined)) {
+        await requestRendererControl('transform_app', { sourceId: source.id, x: params.x, y: params.y, width: params.width, height: params.height });
+      }
+      return scriptRunner.attach(run.runId, source.id);
+    } catch (error) {
+      return { ...scriptRunner.status(run.runId), warning: `Terminal opened, but XR attachment failed: ${error.message}` };
+    }
+  }
   if (method === 'list_apps') {
     const [apps, layout] = await Promise.all([
       availableApplicationWindows(false),
@@ -155,7 +211,17 @@ async function handleControlRequest(method, params = {}) {
     const captured = new Set((layout.windows || []).map((item) => item.sourceId));
     return { ...layout, apps: apps.map((item) => ({ ...item, captured: captured.has(item.id) })) };
   }
-  return requestRendererControl(method, params);
+  const result = await requestRendererControl(method, params);
+  if (method === 'progress_prepare') {
+    const cli = path.join(__dirname, 'bin', 'xr-shell-progress.js');
+    return { ...result, reporting: { executable: 'node', script: cli, jobId: result.job.jobId,
+      socket: progressSocketPath(), commands: {
+        start: `node ${JSON.stringify(cli)} start --job ${result.job.jobId} --total <count>`,
+        update: `node ${JSON.stringify(cli)} update --job ${result.job.jobId} --completed <count>`,
+        finish: `node ${JSON.stringify(cli)} finish --job ${result.job.jobId} --status success`
+      } } };
+  }
+  return result;
 }
 
 async function snapshotForSource(sourceId) {
@@ -311,6 +377,7 @@ app.whenReady().then(() => {
   ipcMain.handle('input:enable', () => statusBridge.request({ type: 'status', prompt: true }));
   ipcMain.handle('input:open-settings', () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'));
   ipcMain.handle('app:launch', (_event, params) => launchApplicationWindow(params || {}));
+  ipcMain.handle('script:run', (_event, params) => handleControlRequest('run_script', params || {}));
   ipcMain.handle('menu:snapshot', async (_event, sourceId) => {
     const windowId = sourceWindowId(sourceId);
     return windowId === null ? { ok: false, error: 'invalid-window-source' } : inspectionBridge.request({ type: 'menu-snapshot', windowId });
@@ -398,6 +465,11 @@ app.whenReady().then(() => {
   createWindow();
   controlServer = new ControlServer({ onRequest: handleControlRequest });
   controlServer.start();
+  progressServer = new ControlServer({ socketPath: progressSocketPath(), onRequest: (method, params) => {
+    if (!PROGRESS_METHODS.has(method)) throw new Error('Unsupported progress command');
+    return requestRendererControl(method, params);
+  } });
+  progressServer.start();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
@@ -413,6 +485,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   controlServer?.stop();
+  progressServer?.stop();
   for (const pending of controlPending.values()) {
     clearTimeout(pending.timeout);
     pending.reject(new Error('XR Shell stopped'));

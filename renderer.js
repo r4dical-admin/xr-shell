@@ -134,6 +134,7 @@ let sessions = [];
 let activeSessionId = null;
 let menuRefreshSequence = 0;
 const a2uiStore = window.XR_A2UI.createStore();
+const progressJobs = window.XR_PROGRESS.createStore();
 const a2uiNodes = new Map();
 const a2uiEvents = [];
 let a2uiEventSequence = 0;
@@ -578,6 +579,8 @@ async function restoreSavedWidget(saved) {
   }
   if (saved.resumeAction?.method === 'open_layout') {
     await handleAgentControl('open_layout', { ...saved.resumeAction.params, surfaceId: saved.surfaceId });
+  } else if (saved.resumeAction?.method === 'progress_prepare') {
+    await handleAgentControl('progress_prepare', saved.resumeAction.params);
   } else {
     const messages = [
       { version: window.XR_A2UI.VERSION, createSurface: { surfaceId: saved.surfaceId, catalogId: saved.catalogId, theme: saved.theme, sendDataModel: saved.sendDataModel } },
@@ -642,12 +645,7 @@ function renderWidgetLibrary() {
 }
 
 function resolveA2UIValue(value, surface) {
-  if (Array.isArray(value)) return value.map((item) => resolveA2UIValue(item, surface));
-  if (value && typeof value === 'object') {
-    if (typeof value.path === 'string' && Object.keys(value).length === 1) return window.XR_A2UI.resolveValue(value, surface.data);
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolveA2UIValue(item, surface)]));
-  }
-  return value;
+  return window.XR_A2UI.resolveBindings(value, surface.data);
 }
 
 const a2uiActionMethods = {
@@ -658,8 +656,18 @@ const a2uiActionMethods = {
   xr_shell_release_app: 'release_app',
   xr_shell_open_layout: 'open_layout',
   xr_shell_add_note: 'add_note',
-  xr_shell_a2ui_delete: 'a2ui_delete'
+  xr_shell_a2ui_delete: 'a2ui_delete',
+  xr_shell_progress_configure: 'progress_configure',
+  xr_shell_run_script: 'run_script'
 };
+
+function showA2UIActionFeedback(surfaceId, message, failed = false) {
+  const status = a2uiNodes.get(surfaceId)?.node.querySelector('.a2ui-action-feedback');
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle('failed', failed);
+  status.hidden = !message;
+}
 
 async function dispatchA2UIAction(surface, component) {
   const event = component.action?.event;
@@ -675,10 +683,17 @@ async function dispatchA2UIAction(surface, component) {
     return;
   }
   try {
-    const result = await handleAgentControl(method, context.arguments || {});
+    const args = { ...(context.arguments || {}) };
+    if (method === 'run_script') {
+      args.args = window.XR_WIDGET_SCRIPT_ARGS.materializeScriptArgs(args.args || []);
+      showA2UIActionFeedback(surface.surfaceId, 'Waiting for script approval…');
+    }
+    const result = await handleAgentControl(method, args);
     recordA2UIEvent(surface, component.id, event.name, context, { ok: true, value: result });
+    if (method === 'run_script') showA2UIActionFeedback(surface.surfaceId, `Started ${result.scriptPath} · run ${result.runId}`);
   } catch (error) {
     recordA2UIEvent(surface, component.id, event.name, context, { ok: false, error: error.message });
+    if (method === 'run_script') showA2UIActionFeedback(surface.surfaceId, error.message, true);
   }
 }
 
@@ -708,6 +723,18 @@ function renderA2UIComponent(surface, componentId, ancestry = new Set()) {
     if (component.child) node.append(renderChild(component.child));
     else node.textContent = String(resolveA2UIValue(component.label || component.text, surface) || 'Action').slice(0, 120);
     node.addEventListener('click', () => dispatchA2UIAction(surface, component));
+  } else if (component.component === 'ProgressBar') {
+    node = document.createElement('div');
+    node.className = 'a2ui-progress';
+    const fill = document.createElement('i');
+    const value = Number(resolveA2UIValue(component.value, surface)) || 0;
+    const max = Number(resolveA2UIValue(component.max, surface)) || 0;
+    fill.style.width = `${max > 0 ? clamp(value / max * 100, 0, 100) : 0}%`;
+    node.setAttribute('role', 'progressbar');
+    node.setAttribute('aria-valuemin', '0');
+    node.setAttribute('aria-valuemax', String(max));
+    node.setAttribute('aria-valuenow', String(Math.max(0, value)));
+    node.append(fill);
   } else if (component.component === 'TextField') {
     node = document.createElement('label');
     node.className = 'a2ui-field';
@@ -718,6 +745,35 @@ function renderA2UIComponent(surface, componentId, ancestry = new Set()) {
     input.value = String(resolveA2UIValue(component.value, surface) ?? '').slice(0, 2000);
     if (component.value?.path) input.addEventListener('input', () => { surface.data = window.XR_A2UI.setPointer(surface.data, component.value.path, input.value); });
     node.append(label, input);
+  } else if (component.component === 'Select') {
+    node = document.createElement('label');
+    node.className = 'a2ui-field';
+    const label = document.createElement('span');
+    label.textContent = String(component.label || 'Choose').slice(0, 120);
+    const select = document.createElement('select');
+    for (const entry of Array.isArray(component.options) ? component.options.slice(0, 40) : []) {
+      const option = document.createElement('option');
+      const value = typeof entry === 'string' ? entry : entry?.value;
+      if (typeof value !== 'string') continue;
+      option.value = value.slice(0, 200);
+      option.textContent = String(typeof entry === 'string' ? entry : entry.label || value).slice(0, 120);
+      select.append(option);
+    }
+    const current = resolveA2UIValue(component.value, surface);
+    if (typeof current === 'string' && [...select.options].some((option) => option.value === current)) select.value = current;
+    else if (component.value?.path && select.options.length) surface.data = window.XR_A2UI.setPointer(surface.data, component.value.path, select.value);
+    if (component.value?.path) select.addEventListener('change', () => { surface.data = window.XR_A2UI.setPointer(surface.data, component.value.path, select.value); });
+    node.append(label, select);
+  } else if (component.component === 'Checkbox') {
+    node = document.createElement('label');
+    node.className = 'a2ui-checkbox';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = resolveA2UIValue(component.value, surface) === true;
+    if (component.value?.path) input.addEventListener('change', () => { surface.data = window.XR_A2UI.setPointer(surface.data, component.value.path, input.checked); });
+    const label = document.createElement('span');
+    label.textContent = String(component.label || 'Enabled').slice(0, 120);
+    node.append(input, label);
   } else if (component.component === 'Divider') {
     node = document.createElement('hr');
   } else if (component.component === 'Icon') {
@@ -793,7 +849,7 @@ function renderA2UISurface(surfaceId) {
   if (!record) {
     const node = document.createElement('article');
     node.className = 'a2ui-surface glass';
-    node.innerHTML = `<header class="a2ui-surface-header"><div><small>AGENT UI · A2UI ${window.XR_A2UI.VERSION.slice(1)}</small><strong></strong></div><nav><button type="button" data-a2ui-save title="Save this widget">SAVE</button><button type="button" data-a2ui-close aria-label="Close generated widget" title="Close">×</button></nav></header><div class="a2ui-surface-content"></div>`;
+    node.innerHTML = `<header class="a2ui-surface-header"><div><small>AGENT UI · A2UI ${window.XR_A2UI.VERSION.slice(1)}</small><strong></strong></div><nav><button type="button" data-a2ui-save title="Save this widget">SAVE</button><button type="button" data-a2ui-close aria-label="Close generated widget" title="Close">×</button></nav></header><div class="a2ui-surface-content"></div><p class="a2ui-action-feedback" role="status" aria-live="polite" hidden></p>`;
     node.querySelector('[data-a2ui-close]').addEventListener('click', () => removeA2UISurface(surfaceId, true));
     node.querySelector('[data-a2ui-save]').addEventListener('click', () => {
       const current = a2uiStore.surfaces.get(surfaceId);
@@ -888,6 +944,50 @@ function layoutSurfaceMessages(params, opened, failures) {
     { version: window.XR_A2UI.VERSION, createSurface: { surfaceId, catalogId: window.XR_A2UI.BASIC_CATALOG } },
     { version: window.XR_A2UI.VERSION, updateComponents: { surfaceId, components } }
   ] };
+}
+
+function progressSurfaceId(jobId) { return `progress_${jobId}`; }
+
+function progressWidgetMessages(job) {
+  const surfaceId = progressSurfaceId(job.jobId);
+  const components = [
+    { id: 'root', component: 'Card', child: 'body' },
+    { id: 'body', component: 'Column', children: ['eyebrow', 'headline', 'bar', 'progress', 'status', 'detail', 'views'] },
+    { id: 'eyebrow', component: 'Text', text: 'LIVE SCRIPT PROGRESS' },
+    { id: 'headline', component: 'Text', variant: 'h2', text: { path: '/headline' } },
+    { id: 'bar', component: 'ProgressBar', value: { path: '/completed' }, max: { path: '/total' } },
+    { id: 'progress', component: 'Text', text: { path: '/progress' } },
+    { id: 'status', component: 'Text', text: { path: '/status' } },
+    { id: 'detail', component: 'Text', text: { path: '/detail' } },
+    { id: 'views', component: 'Row', children: ['remaining', 'eta', 'metrics'] }
+  ];
+  for (const view of window.XR_PROGRESS.VIEWS) {
+    components.push({ id: view, component: 'Button', label: view.toUpperCase(), action: { event: {
+      name: 'mcp.call', context: { tool: 'xr_shell_progress_configure', arguments: { jobId: job.jobId, view } }
+    } } });
+  }
+  return [
+    { version: window.XR_A2UI.VERSION, createSurface: { surfaceId, catalogId: window.XR_A2UI.XR_CATALOG } },
+    { version: window.XR_A2UI.VERSION, updateComponents: { surfaceId, components } }
+  ];
+}
+
+function syncProgressWidget(job, create = false, persist = true) {
+  const surfaceId = progressSurfaceId(job.jobId);
+  const existing = a2uiStore.surfaces.get(surfaceId);
+  if (existing && existing.resumeAction?.method !== 'progress_prepare') throw new Error(`A2UI surface ID is already in use: ${surfaceId}`);
+  if (!a2uiStore.surfaces.has(surfaceId)) {
+    if (!create) return;
+    applyA2UI(progressWidgetMessages(job), { title: job.title, width: 350 });
+  }
+  applyA2UI([{ version: window.XR_A2UI.VERSION, updateDataModel: {
+    surfaceId, value: window.XR_PROGRESS.presentation(job)
+  } }]);
+  const surface = a2uiStore.surfaces.get(surfaceId);
+  surface.placement.title = job.title;
+  surface.resumeAction = { method: 'progress_prepare', params: { jobId: job.jobId, title: job.title, view: job.view } };
+  renderA2UISurface(surfaceId);
+  if (persist && savedA2UIWidgets.some((item) => item.surfaceId === surfaceId)) saveA2UISurface(surface, true);
 }
 
 function layoutCapturedMedia(panel, video, cropTop = 0) {
@@ -995,6 +1095,29 @@ function resolveCapturedApp(params = {}) {
 }
 
 async function handleAgentControl(method, params = {}) {
+  if (method === 'run_script') return window.horizon.runScript(params);
+  if (method === 'progress_prepare') {
+    const surfaceId = progressSurfaceId(window.XR_PROGRESS.requireJobId(params.jobId));
+    const existingSurface = a2uiStore.surfaces.get(surfaceId);
+    if (existingSurface && existingSurface.resumeAction?.method !== 'progress_prepare') throw new Error(`A2UI surface ID is already in use: ${surfaceId}`);
+    const job = window.XR_PROGRESS.prepare(progressJobs, params);
+    syncProgressWidget(job, true);
+    return { job, surfaceId: progressSurfaceId(job.jobId) };
+  }
+  if (method === 'progress_configure') {
+    const job = window.XR_PROGRESS.configure(progressJobs, params);
+    syncProgressWidget(job);
+    return { job, surfaceId: progressSurfaceId(job.jobId) };
+  }
+  if (method === 'progress_get') {
+    const jobId = window.XR_PROGRESS.requireJobId(params.jobId);
+    return { job: window.XR_PROGRESS.snapshot(progressJobs.get(jobId)) };
+  }
+  if (['progress_start', 'progress_update', 'progress_finish'].includes(method)) {
+    const job = window.XR_PROGRESS.report(progressJobs, method.slice('progress_'.length), params);
+    syncProgressWidget(job);
+    return { job };
+  }
   if (method === 'get_layout') return {
     activeSourceId: activeCaptureId,
     viewport: { width: viewport.clientWidth, height: viewport.clientHeight },
@@ -1002,7 +1125,8 @@ async function handleAgentControl(method, params = {}) {
       offsetOrigin: 'canvas center', centerOrigin: 'canvas top-left', xDirection: 'right', yDirection: 'down' },
     placement: 'Window x/y are pixel offsets from the assigned horizontal slot, bounded by offsetLimits. centerX/centerY are actual canvas coordinates. New windows change existing slots.',
     windows: [...capturedWindows.entries()].map(([id, captured]) => capturedLayoutItem(id, captured)),
-    surfaces: window.XR_A2UI.summarize(a2uiStore)
+    surfaces: window.XR_A2UI.summarize(a2uiStore),
+    progressJobs: [...progressJobs.values()].slice(-50).map((job) => window.XR_PROGRESS.snapshot(job))
   };
   if (method === 'a2ui_capabilities') return {
     version: window.XR_A2UI.VERSION,
@@ -1777,6 +1901,12 @@ setInterval(() => {
     const button = captured.panel.querySelector('[data-profile]');
     button.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
     captured.panel.querySelector('footer b').textContent = `${seconds ? 'LEARNING AX PATTERNS' : 'FINALIZING PROFILE'} · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  }
+}, 1000);
+setInterval(() => {
+  for (const job of progressJobs.values()) {
+    if (job.status !== 'running' || job.view !== 'eta' || !a2uiStore.surfaces.has(progressSurfaceId(job.jobId))) continue;
+    syncProgressWidget(window.XR_PROGRESS.snapshot(job), false, false);
   }
 }, 1000);
 requestAnimationFrame(animate);

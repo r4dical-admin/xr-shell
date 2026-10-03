@@ -8,7 +8,7 @@
   const VERSION = 'v0.9.1';
   const BASIC_CATALOG = 'https://a2ui.org/specification/v0_9_1/catalogs/basic/catalog.json';
   const XR_CATALOG = 'https://xr-shell.local/catalogs/spatial/v0_9_1';
-  const COMPONENTS = new Set(['Card', 'Column', 'Row', 'Text', 'Button', 'Divider', 'Icon', 'TextField']);
+  const COMPONENTS = new Set(['Card', 'Column', 'Row', 'Text', 'Button', 'Divider', 'Icon', 'TextField', 'Select', 'Checkbox', 'ProgressBar']);
   const ID_PATTERN = /^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$/;
 
   function createStore() {
@@ -51,6 +51,15 @@
 
   function resolveValue(value, model) {
     if (value && typeof value === 'object' && typeof value.path === 'string') return valueAt(model, value.path);
+    return value;
+  }
+
+  function resolveBindings(value, model) {
+    if (Array.isArray(value)) return value.map((item) => resolveBindings(item, model));
+    if (value && typeof value === 'object') {
+      if (typeof value.path === 'string' && Object.keys(value).length === 1) return valueAt(model, value.path);
+      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolveBindings(item, model)]));
+    }
     return value;
   }
 
@@ -120,5 +129,5 @@
     }));
   }
 
-  return { VERSION, BASIC_CATALOG, XR_CATALOG, COMPONENTS: [...COMPONENTS], createStore, applyMessages, resolveValue, setPointer, summarize };
+  return { VERSION, BASIC_CATALOG, XR_CATALOG, COMPONENTS: [...COMPONENTS], createStore, applyMessages, resolveValue, resolveBindings, setPointer, summarize };
 });

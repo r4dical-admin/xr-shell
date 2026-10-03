@@ -16,6 +16,9 @@ const ACTION_METHODS = Object.freeze({
   xr_shell_release_app: 'release_app',
   xr_shell_open_layout: 'open_layout',
   xr_shell_add_note: 'add_note',
+  xr_shell_progress_prepare: 'progress_prepare',
+  xr_shell_progress_configure: 'progress_configure',
+  xr_shell_run_script: 'run_script',
   xr_shell_a2ui_apply: 'a2ui_apply',
   xr_shell_a2ui_delete: 'a2ui_delete'
 });
@@ -51,11 +54,14 @@ Action tag format:
 
 Allow-listed actions:
 - xr_shell_add_note: {title?, body (required), surfaceId?, x?, y?, width?}
+- xr_shell_progress_prepare: {jobId (required, stable identifier shared with the script), title?, view?: remaining|eta|metrics}. Creates a waiting widget. Tell the user which jobId to instrument in their IDE script; it reports via the dedicated local progress command, not through the agent.
+- xr_shell_progress_configure: {jobId, view: remaining|eta|metrics}. Changes an existing progress widget without changing its script.
+- xr_shell_run_script: {scriptPath (required absolute path to an existing .py, .js, .mjs, .cjs, or .sh file), args?: string[], display?: background|terminal, jobId?, title?, x?, y?, width?, height?}. Progress is optional; include jobId only when the script reports progress, or omit it for ordinary runs and --help inspection. Use display:"terminal" when the user wants the script in a macOS Terminal window attached to XR Shell; otherwise output is captured in the background. XR Shell asks the user to approve the exact path and arguments. Do not guess a script path or claim you edited/instrumented it; ask for the path if unknown. Never put a shell command in scriptPath.
 - xr_shell_launch_app: {app or bundleId, windowQuery?, waitMs?, x?, y?, width?, height?}. It already launches and attaches the window, so never follow it with xr_shell_pull_app. Prefer ordinary macOS names such as "Calculator" and omit waitMs unless the user requests a timeout.
 - xr_shell_pull_app / xr_shell_focus_app / xr_shell_release_app: {sourceId? or query?}
 - xr_shell_transform_app: {sourceId? or query?, x?, y?, width?, height?}
 - xr_shell_open_layout: {title?, surfaceId?, x?, y?, apps:[{app or bundleId or query, x?, y?, width?, height?}]}
-- xr_shell_a2ui_apply: {messages:[A2UI messages], placement?}
+- xr_shell_a2ui_apply: {messages:[A2UI messages], placement?}. Use A2UI v0.9.1 Basic Catalog for agent-made widgets. Supported form components include TextField, Select (options:[{label,value}]), and Checkbox; bind each value to a data path such as {path:"/mode"}. A Button can use action.event.name "mcp.call" with context.tool "xr_shell_run_script" and context.arguments {scriptPath, args, display?, jobId?}. In args, {path:"/mode"} inserts a field's string value, and {value:"--dry-run",when:{path:"/dryRun"}} includes a flag only when a checkbox is checked. The display field can bind to a Select offering background and terminal. This local button action runs without another agent turn and still asks for script approval. Include createSurface, updateComponents, and updateDataModel messages. Every widget receives Save and Close controls.
 - xr_shell_a2ui_delete: {surfaceId}
 
 Placement guide: Current XR Shell state includes viewport and canvas sizes, each window's assigned slotX, x/y offsets, offsetLimits, centerX/centerY, dimensions, and floating surfaces. Treat x/y as offsets from that window's slot, not absolute screen coordinates. For a requested left/center/right layout, use the current canvas width and viewport width, keep window edges within the canvas, and account for window sizes and occupied centers. Adding an app changes all horizontal slots, so adjust windows after pulling the full set. If the state is unavailable, omit x/y instead of guessing large offsets.
@@ -176,7 +182,10 @@ class ChatRunner {
       if (parsed.actions.length) {
         this.onEvent({ clientId, type: 'status', status: 'command_execution' });
         actionWork = actionWork.then(async () => {
-          for (const action of parsed.actions) await this.executeAction(action.method, action.arguments);
+          for (const action of parsed.actions) {
+            const result = await this.executeAction(action.method, action.arguments);
+            if (action.method === 'run_script') this.onEvent({ clientId, type: 'message', text: `Started ${result.scriptPath}${result.jobId ? ` for ${result.jobId}` : ''} in ${result.display}${result.attached ? ' (attached to XR)' : ''} (run ${result.runId}).${result.warning ? ` ${result.warning}` : ''}` });
+          }
         }).catch((error) => { actionError ||= error; });
       }
     };

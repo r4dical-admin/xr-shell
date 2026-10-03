@@ -32,3 +32,16 @@ test('A2UI surfaces can be explicitly deleted', () => {
   applyMessages(store, { version: VERSION, deleteSurface: { surfaceId: 'temporary' } });
   assert.equal(store.surfaces.size, 0);
 });
+
+test('A2UI accepts a data-bound XR progress bar', () => {
+  const store = createStore();
+  applyMessages(store, [
+    { version: VERSION, createSurface: { surfaceId: 'progress_job', catalogId: 'https://xr-shell.local/catalogs/spatial/v0_9_1' } },
+    { version: VERSION, updateComponents: { surfaceId: 'progress_job', components: [
+      { id: 'root', component: 'Card', child: 'bar' },
+      { id: 'bar', component: 'ProgressBar', value: { path: '/completed' }, max: { path: '/total' } }
+    ] } },
+    { version: VERSION, updateDataModel: { surfaceId: 'progress_job', value: { completed: 2, total: 5 } } }
+  ]);
+  assert.equal(resolveValue(store.surfaces.get('progress_job').components.get('bar').value, store.surfaces.get('progress_job').data), 2);
+});

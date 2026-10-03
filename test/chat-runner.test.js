@@ -18,11 +18,19 @@ test('extractShellActions rejects tools outside the allow-list', () => {
   assert.deepEqual(result.actions, []);
 });
 
+test('command deck can prepare a widget and launch its script in order', () => {
+  const result = extractShellActions('<xr-shell-action>{"tool":"xr_shell_progress_prepare","arguments":{"jobId":"batch"}}</xr-shell-action>\n<xr-shell-action>{"tool":"xr_shell_run_script","arguments":{"jobId":"batch","scriptPath":"/tmp/batch.py"}}</xr-shell-action>');
+  assert.deepEqual(result.actions.map((action) => action.method), ['progress_prepare', 'run_script']);
+  assert.match(commandDeckPrompt('Run batch'), /Progress is optional/);
+});
+
 test('command deck prompt carries state and prevents app permission detours', () => {
   const prompt = commandDeckPrompt('Create a note', { apps: [{ name: 'Calculator' }] });
   assert.match(prompt, /host-mediated action protocol/);
   assert.match(prompt, /Never ask the user to enable Electron\/macOS app control/);
   assert.match(prompt, /Calculator/);
+  assert.match(prompt, /Checkbox/);
+  assert.match(prompt, /xr_shell_run_script/);
 });
 
 test('command deck context has a bounded wait', async () => {

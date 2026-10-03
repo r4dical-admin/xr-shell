@@ -51,6 +51,8 @@ The frontmost captured application also owns one shared menu bar near the top of
 
 XR Shell includes a zero-dependency local MCP server. XR Shell must be running; the MCP process connects through a user-only Unix socket and never opens a network port.
 
+[Agent capabilities and example requests](docs/agent-capabilities.md) is the consolidated guide to what XR Shell agents and generated widgets can do, including current limits.
+
 Configure any MCP client to launch:
 
 ```json
@@ -72,12 +74,33 @@ XR Shell's built-in agent chat exposes the same controls through its local allow
 
 XR Shell implements a safe subset of the production A2UI v0.9.1 protocol. Agent-generated surfaces use the Basic Catalog component model and are rendered as persistent spatial widgets. XR Shell always adds its own drag handle, **Save**, and close controls, so an agent cannot create a widget that traps the user. Saved widgets appear in the top-bar **Widgets** library, where they can be turned on, turned off, or permanently deleted. Restoring a saved app layout reruns its app-and-placement recipe locally, launching missing applications before attaching their windows.
 
-The initial use cases are:
+The built-in use cases include:
 
-- `xr_shell_open_layout`: opens one to three named macOS app windows, applies their requested XR positions and sizes, and creates a draggable layout controller.
+- `xr_shell_open_layout`: opens up to twelve named macOS app windows, applies their requested XR positions and sizes, and creates a draggable layout controller.
 - `xr_shell_add_note`: creates a draggable floating note.
 - `xr_shell_a2ui_apply`: applies ordered `createSurface`, `updateComponents`, `updateDataModel`, and `deleteSurface` messages.
 - `xr_shell_a2ui_capabilities`, `xr_shell_a2ui_delete`, and `xr_shell_a2ui_events`: inspect support, remove surfaces, and read explicit user events.
+
+### Script progress from an IDE
+
+Ask the XR Shell agent to **prepare a progress widget** with a stable job ID such as `data_import`. It calls `xr_shell_progress_prepare` and returns the reporting commands. The widget starts in a waiting state. Your IDE agent can then add calls to the script: `start` before the loop, `update` after each completed iteration, and `finish` on success or failure. Routine updates do not use the agent or MCP; the command sends JSON over a separate user-only Unix socket named `xr-shell-progress-<uid>.sock` in the system temporary directory. The existing MCP control socket remains separate.
+
+For example, from the same Mac running XR Shell:
+
+```bash
+node /Users/ido/Documents/xr-shell/bin/xr-shell-progress.js start --job data_import --total 10
+node /Users/ido/Documents/xr-shell/bin/xr-shell-progress.js update --job data_import --completed 1 --metrics-json '{"files":42}'
+node /Users/ido/Documents/xr-shell/bin/xr-shell-progress.js update --job data_import --completed 2 --total 12
+node /Users/ido/Documents/xr-shell/bin/xr-shell-progress.js finish --job data_import --status success
+```
+
+Use `--status failure --message "reason"` when the script fails. Progress reports warn on stderr but do not fail the script if XR Shell is unavailable; add `--required` to make delivery errors return a nonzero exit code. Invalid command arguments always return exit code 2. Each job ID has one active run; another `start` after a completed or failed run resets its counts. The widget stays visible at the end until closed. Closing it does not stop the script. Ask the agent to reopen the same job ID if needed.
+
+The widget defaults to remaining runs and has local **Remaining / ETA / Metrics** buttons. The agent can also call `xr_shell_progress_configure` to switch views, and `xr_shell_progress_get` to inspect the state. Additional named metrics can be sent with `--metrics-json` without changing the core reporting calls. Use a distinct job ID for each concurrent script.
+
+`xr_shell_run_script` can also run an ordinary script without a progress widget: omit `jobId`. It accepts an absolute `scriptPath`, optional `args`, and `display: "background"` (default) or `display: "terminal"`. Terminal mode opens the script in macOS Terminal and attaches its new window to XR Shell; the Terminal window shows output and remains interactive after the script exits. Background mode captures bounded stdout/stderr tails for `xr_shell_script_status`. Supplying `jobId` creates or reopens the progress widget if needed, but only an instrumented script will report progress. XR Shell shows a native confirmation dialog with the exact path, arguments, display mode, and progress choice before every launch. Only existing `.py`, `.js`, `.mjs`, `.cjs`, and `.sh` files are accepted. The script runs from its own directory with the macOS user's permissions. The built-in XR chat can launch it, but cannot edit or instrument it; use an IDE agent for code changes.
+
+Agent-made A2UI widgets can include text fields, selectors, checkboxes, and a **Run** button. A button can bind those values into `xr_shell_run_script` arguments; optional flags use `{ "value": "--flag", "when": { "path": "/enabled" } }`. The widget can also offer a background/terminal picker. Clicking Run acts locally without another agent turn and still asks the user to approve the exact script launch. See the [widget example](docs/agent-capabilities.md#script-control-widget) for the complete A2UI payload.
 
 Rendered components are self-contained after creation. Dragging, closing, local form state, and allowlisted `mcp.call` actions run inside XR Shell without another agent turn. Only an explicit agent-directed event needs to be read by an agent. Arbitrary HTML, scripts, executable renderer functions, and unregistered components are rejected.
 
