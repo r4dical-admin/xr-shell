@@ -24,6 +24,20 @@ test('script requests accept exact local scripts and bounded arguments', () => {
   assert.throws(() => scriptRequest({ jobId: 'demo', scriptPath: __filename, args: 'one' }), /args must/);
 });
 
+test('regular commands resolve to an executable and keep arguments separate from the shell', () => {
+  const request = scriptRequest({ command: 'node', args: ['--version'], cwd: process.cwd() });
+  assert.equal(request.kind, 'command');
+  assert.equal(request.commandArgs[0], '--version');
+  assert.equal(request.cwd, fs.realpathSync(process.cwd()));
+  assert.equal(request.scriptPath, null);
+  assert.ok(path.isAbsolute(request.command));
+  assert.throws(() => scriptRequest({ command: 'echo hello' }), /executable name/);
+  assert.throws(() => scriptRequest({ command: 'git;rm', cwd: process.cwd() }), /executable name/);
+  assert.throws(() => scriptRequest({ command: 'node', cwd: 'relative' }), /absolute local directory/);
+  assert.throws(() => scriptRequest({ command: 'node', scriptPath: __filename }), /either command or scriptPath/);
+  assert.throws(() => scriptRequest({ command: 'definitely-not-an-xr-command' }), /Executable not found/);
+});
+
 test('terminal launcher quotes every path and argument and reports exit status', async () => {
   const runner = new ScriptRunner();
   const request = scriptRequest({ scriptPath: __filename, display: 'terminal', args: ["a'b", '--help'] });

@@ -1,6 +1,7 @@
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
 #import <Foundation/Foundation.h>
+#include <unistd.h>
 
 static void Emit(NSDictionary *value) {
     NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
@@ -405,7 +406,7 @@ static CGEventFlags Flags(NSArray<NSString *> *names) {
     return flags;
 }
 
-static BOOL PostPointer(NSDictionary *command, pid_t pid, CGPoint point, uint32_t windowID) {
+static BOOL PostPointer(NSDictionary *command, pid_t pid, CGPoint point, uint32_t windowID, BOOL physical) {
     NSInteger number = [command[@"button"] integerValue];
     CGMouseButton button = number == 2 ? kCGMouseButtonRight : number == 1 ? kCGMouseButtonCenter : kCGMouseButtonLeft;
     NSString *phase = command[@"phase"] ?: @"move";
@@ -414,12 +415,21 @@ static BOOL PostPointer(NSDictionary *command, pid_t pid, CGPoint point, uint32_
     else if ([phase isEqualToString:@"up"]) type = button == kCGMouseButtonRight ? kCGEventRightMouseUp : button == kCGMouseButtonCenter ? kCGEventOtherMouseUp : kCGEventLeftMouseUp;
     else if ([phase isEqualToString:@"drag"]) type = button == kCGMouseButtonRight ? kCGEventRightMouseDragged : button == kCGMouseButtonCenter ? kCGEventOtherMouseDragged : kCGEventLeftMouseDragged;
     else type = kCGEventMouseMoved;
+    // Window-server hit testing uses the real cursor position for ordinary mouse
+    // input. Process-directed events alone miss controls in many apps.
+    if (physical) {
+        CGDirectDisplayID display = 0;
+        uint32_t count = 0;
+        if (CGGetDisplaysWithPoint(point, 1, &display, &count) != kCGErrorSuccess || count == 0
+            || CGWarpMouseCursorPosition(point) != kCGErrorSuccess) return NO;
+    }
     CGEventRef event = CGEventCreateMouseEvent(NULL, type, point, button);
     if (!event) return NO;
     CGEventSetIntegerValueField(event, kCGMouseEventClickState, [command[@"clickCount"] integerValue] ?: 1);
     CGEventSetIntegerValueField(event, kCGMouseEventWindowUnderMousePointer, windowID);
     CGEventSetIntegerValueField(event, kCGMouseEventWindowUnderMousePointerThatCanHandleThisEvent, windowID);
-    CGEventPostToPid(pid, event);
+    if (physical) CGEventPost(kCGHIDEventTap, event);
+    else CGEventPostToPid(pid, event);
     CFRelease(event);
     return YES;
 }
@@ -498,12 +508,12 @@ static BOOL ActivateAtPoint(pid_t pid, CGPoint point, NSInteger button, uint32_t
     return handled;
 }
 
-static BOOL FallbackClick(NSDictionary *command, pid_t pid, CGPoint point, uint32_t windowID) {
+static BOOL PhysicalClick(NSDictionary *command, pid_t pid, CGPoint point, uint32_t windowID) {
     NSMutableDictionary *down = [command mutableCopy];
     down[@"phase"] = @"down";
     NSMutableDictionary *up = [command mutableCopy];
     up[@"phase"] = @"up";
-    return PostPointer(down, pid, point, windowID) && PostPointer(up, pid, point, windowID);
+    return PostPointer(down, pid, point, windowID, YES) && PostPointer(up, pid, point, windowID, YES);
 }
 
 static BOOL PostScroll(NSDictionary *command, pid_t pid, CGPoint point) {
@@ -739,13 +749,20 @@ int main(int argc, const char *argv[]) {
                     continue;
                 }
                 BOOL ok = NO;
-                if ([type isEqualToString:@"pointer"]) ok = PostPointer(command, pid, point, [command[@"windowId"] unsignedIntValue]);
-                else if ([type isEqualToString:@"activate"]) {
-                    ok = ActivateAtPoint(pid, point, [command[@"button"] integerValue], [command[@"windowId"] unsignedIntValue]);
-                    if (!ok) {
+                if ([type isEqualToString:@"pointer"]) {
+                    NSString *phase = command[@"phase"] ?: @"move";
+                    BOOL physical = ![phase isEqualToString:@"move"];
+                    if ([phase isEqualToString:@"down"]) {
                         RaiseTargetWindow([command[@"windowId"] unsignedIntValue]);
-                        ok = FallbackClick(command, pid, point, [command[@"windowId"] unsignedIntValue]);
+                        usleep(50000);
                     }
+                    ok = PostPointer(command, pid, point, [command[@"windowId"] unsignedIntValue], physical);
+                }
+                else if ([type isEqualToString:@"activate"]) {
+                    RaiseTargetWindow([command[@"windowId"] unsignedIntValue]);
+                    usleep(50000);
+                    ok = PhysicalClick(command, pid, point, [command[@"windowId"] unsignedIntValue]);
+                    if (!ok) ok = ActivateAtPoint(pid, point, [command[@"button"] integerValue], [command[@"windowId"] unsignedIntValue]);
                 }
                 else if ([type isEqualToString:@"scroll"]) { RaiseTargetWindow([command[@"windowId"] unsignedIntValue]); ok = PostScroll(command, pid, point); }
                 else if ([type isEqualToString:@"text"]) { RaiseTargetWindow([command[@"windowId"] unsignedIntValue]); ok = PostText(command, pid); }

@@ -75,6 +75,7 @@ const windowPicker = document.getElementById('window-picker');
 const appStage = document.getElementById('app-stage');
 const a2uiStage = document.getElementById('a2ui-stage');
 const chatInput = document.getElementById('chat-input');
+const focusAgentButton = document.getElementById('focus-agent');
 const chatSend = document.getElementById('chat-send');
 const chatResponse = document.getElementById('chat-response');
 const sessionList = document.getElementById('session-list');
@@ -686,11 +687,11 @@ async function dispatchA2UIAction(surface, component) {
     const args = { ...(context.arguments || {}) };
     if (method === 'run_script') {
       args.args = window.XR_WIDGET_SCRIPT_ARGS.materializeScriptArgs(args.args || []);
-      showA2UIActionFeedback(surface.surfaceId, 'Waiting for script approval…');
+      showA2UIActionFeedback(surface.surfaceId, 'Waiting for command approval…');
     }
     const result = await handleAgentControl(method, args);
     recordA2UIEvent(surface, component.id, event.name, context, { ok: true, value: result });
-    if (method === 'run_script') showA2UIActionFeedback(surface.surfaceId, `Started ${result.scriptPath} · run ${result.runId}`);
+    if (method === 'run_script') showA2UIActionFeedback(surface.surfaceId, `Started ${result.scriptPath || result.command} · run ${result.runId}`);
   } catch (error) {
     recordA2UIEvent(surface, component.id, event.name, context, { ok: false, error: error.message });
     if (method === 'run_script') showA2UIActionFeedback(surface.surfaceId, error.message, true);
@@ -1049,6 +1050,27 @@ function centerWorkspace() {
   window.horizon.trackingControl('recenter');
 }
 
+function setAgentFocus(enabled) {
+  workspace.classList.toggle('agent-focus', enabled);
+  focusAgentButton.setAttribute('aria-pressed', String(enabled));
+  focusAgentButton.textContent = enabled ? 'Back to apps' : 'Agent';
+  for (const panel of appStage.querySelectorAll('.captured-window')) {
+    if (!enabled) {
+      panel.style.setProperty('--agent-shift-x', '0px');
+      continue;
+    }
+    const slot = parseFloat(panel.style.getPropertyValue('--slot-x')) || 0;
+    const center = slot * window.innerWidth / 100 + Number(panel.dataset.offsetX || 0);
+    const clearance = window.innerWidth * .85 + panel.offsetWidth / 2;
+    const target = center < 0 ? -clearance : clearance;
+    panel.style.setProperty('--agent-shift-x', `${Math.abs(center) < clearance ? target - center : 0}px`);
+  }
+  if (enabled) {
+    centerWorkspace();
+    chatInput.focus({ preventScroll: true });
+  }
+}
+
 function layoutCapturedWindows() {
   const items = [...capturedWindows.values()];
   const requiredScale = window.XR_WINDOW_LAYOUT.requiredHorizontalScale(items.length, virtualScale);
@@ -1058,8 +1080,9 @@ function layoutCapturedWindows() {
     const position = positions[index];
     item.panel.dataset.slot = String(index);
     item.panel.style.setProperty('--slot-x', `${position}vw`);
-    item.panel.style.setProperty('--tilt', `${position === 0 ? 0 : position < 0 ? 2.5 : -2.5}deg`);
+    item.panel.style.setProperty('--tilt', `${position === 0 ? 0 : position < 0 ? -2.5 : 2.5}deg`);
   });
+  if (workspace.classList.contains('agent-focus')) setAgentFocus(true);
 }
 
 function capturedLayoutItem(sourceId, captured) {
@@ -1622,6 +1645,7 @@ document.getElementById('add-window').addEventListener('click', () => {
   const source = availableWindows.find((item) => item.id === windowPicker.value);
   captureWindow(source);
 });
+focusAgentButton.addEventListener('click', () => setAgentFocus(!workspace.classList.contains('agent-focus')));
 document.getElementById('refresh-windows').addEventListener('click', async (event) => {
   event.currentTarget.classList.add('active');
   await loadWindows(true).catch(() => {});

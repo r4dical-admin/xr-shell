@@ -20,10 +20,47 @@ function nodeRuntime() {
   return executable ? [executable] : ['/usr/bin/env', 'node'];
 }
 
+function commandExecutable(value) {
+  if (typeof value !== 'string' || !value || /[\x00-\x20\x7f]/.test(value)) throw new Error('command must be an executable name or absolute path');
+  let candidates;
+  if (path.isAbsolute(value)) candidates = [value];
+  else {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(value)) throw new Error('command must be an executable name or absolute path');
+    candidates = (process.env.PATH || '').split(path.delimiter).filter(path.isAbsolute).map((directory) => path.join(directory, value));
+  }
+  for (const candidate of candidates) {
+    try {
+      const resolved = fs.realpathSync(candidate);
+      if (fs.statSync(resolved).isFile()) {
+        fs.accessSync(resolved, fs.constants.X_OK);
+        return resolved;
+      }
+    } catch { /* Try the next PATH entry. */ }
+  }
+  throw new Error(`Executable not found: ${value}`);
+}
+
+function workingDirectory(value) {
+  const input = value === undefined ? os.homedir() : value;
+  if (typeof input !== 'string' || !path.isAbsolute(input) || /[\x00-\x1f\x7f]/.test(input)) throw new Error('cwd must be an absolute local directory');
+  const resolved = fs.realpathSync(input);
+  if (!fs.statSync(resolved).isDirectory()) throw new Error('cwd must be a directory');
+  return resolved;
+}
+
 function scriptRequest(params = {}) {
   const jobId = params.jobId === undefined || params.jobId === null || params.jobId === '' ? null : requireJobId(params.jobId);
   const display = params.display || 'background';
   if (!['background', 'terminal'].includes(display)) throw new Error('display must be background or terminal');
+  const args = params.args === undefined ? [] : params.args;
+  if (!Array.isArray(args) || args.length > 24 || args.some((arg) => typeof arg !== 'string' || arg.length > 400 || /[\x00-\x1f\x7f]/.test(arg))) {
+    throw new Error('args must be an array of at most 24 short strings');
+  }
+  if (params.command !== undefined) {
+    if (params.scriptPath !== undefined) throw new Error('Provide either command or scriptPath, not both');
+    const command = commandExecutable(params.command);
+    return { jobId, display, kind: 'command', scriptPath: null, args, command, commandArgs: args, cwd: workingDirectory(params.cwd) };
+  }
   const inputPath = params.scriptPath;
   if (typeof inputPath !== 'string' || !path.isAbsolute(inputPath) || /[\x00-\x1f\x7f]/.test(inputPath)) throw new Error('scriptPath must be an absolute local path');
   const scriptPath = fs.realpathSync(inputPath);
@@ -32,11 +69,8 @@ function scriptRequest(params = {}) {
   const extension = path.extname(scriptPath).toLowerCase();
   const runtime = ['.js', '.mjs', '.cjs'].includes(extension) ? nodeRuntime() : RUNTIMES[extension];
   if (!runtime) throw new Error('Only .py, .js, .mjs, .cjs, and .sh scripts are supported');
-  const args = params.args === undefined ? [] : params.args;
-  if (!Array.isArray(args) || args.length > 24 || args.some((arg) => typeof arg !== 'string' || arg.length > 400 || /[\x00-\x1f\x7f]/.test(arg))) {
-    throw new Error('args must be an array of at most 24 short strings');
-  }
-  return { jobId, display, scriptPath, args, command: runtime[0], commandArgs: [...runtime.slice(1), scriptPath, ...args], cwd: path.dirname(scriptPath) };
+  if (params.cwd !== undefined) throw new Error('cwd is only supported with command');
+  return { jobId, display, kind: 'script', scriptPath, args, command: runtime[0], commandArgs: [...runtime.slice(1), scriptPath, ...args], cwd: path.dirname(scriptPath) };
 }
 
 function shellQuote(value) {
@@ -74,7 +108,7 @@ class ScriptRunner {
   async launch(request) {
     this.hasCapacity();
     const runId = randomUUID();
-    const run = { runId, jobId: request.jobId, display: 'background', scriptPath: request.scriptPath, args: request.args, status: 'running', startedAt: Date.now(), finishedAt: null, exitCode: null, signal: null, stdout: '', stderr: '' };
+    const run = { runId, jobId: request.jobId, display: 'background', kind: request.kind, scriptPath: request.scriptPath, command: request.command, cwd: request.cwd, args: request.args, status: 'running', startedAt: Date.now(), finishedAt: null, exitCode: null, signal: null, stdout: '', stderr: '' };
     const child = this.spawnProcess(request.command, request.commandArgs, {
       cwd: request.cwd, shell: false, stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -105,7 +139,7 @@ class ScriptRunner {
     this.hasCapacity();
     const runId = randomUUID();
     const launch = terminalLauncher(request, runId);
-    const run = { runId, jobId: request.jobId, display: 'terminal', scriptPath: request.scriptPath, args: request.args, status: 'launching', startedAt: Date.now(), finishedAt: null, exitCode: null, signal: null, stdout: '', stderr: '', attached: false };
+    const run = { runId, jobId: request.jobId, display: 'terminal', kind: request.kind, scriptPath: request.scriptPath, command: request.command, cwd: request.cwd, args: request.args, status: 'launching', startedAt: Date.now(), finishedAt: null, exitCode: null, signal: null, stdout: '', stderr: '', attached: false };
     this.remember(run);
     const cleanup = () => {
       clearInterval(run.pollTimer);

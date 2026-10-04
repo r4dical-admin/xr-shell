@@ -10,7 +10,7 @@ XR Shell has two agent entry points: its built-in command deck and the local MCP
 | Add spatial information | `xr_shell_add_note`, `xr_shell_a2ui_apply` | Create draggable, closable notes and custom widgets. Widgets can be saved to the local library. |
 | Observe widget interaction | `xr_shell_a2ui_capabilities`, `xr_shell_a2ui_events`, `xr_shell_a2ui_delete` | Discover supported components, read explicit user events, or remove a surface. |
 | Track a local script | `xr_shell_progress_prepare`, `xr_shell_progress_get`, `xr_shell_progress_configure` | Show remaining runs, ETA, and metrics; the script reports over a separate local socket. |
-| Run a script | `xr_shell_run_script`, `xr_shell_script_status` | Approve and launch an exact `.py`, `.js`, `.mjs`, `.cjs`, or `.sh` file, with or without progress. Run in the background or an attached macOS Terminal window. |
+| Run a script or CLI command | `xr_shell_run_script`, `xr_shell_script_status` | Approve and launch an exact script or a regular executable with separate arguments, with or without progress. Run in the background or an attached macOS Terminal window. |
 
 Examples you can ask the XR Shell agent:
 
@@ -20,8 +20,9 @@ Examples you can ask the XR Shell agent:
 - “Prepare a progress widget for `data_import`, then run `/absolute/path/to/import.py` with `--mode fast`.”
 - “Run `/absolute/path/to/report.py --help` in the background without a progress widget.”
 - “Run `/absolute/path/to/report.py` in Terminal and attach its window to XR Shell; no progress widget.”
+- “Run `git status` in `/absolute/project/path` in the background, without a progress widget.”
 
-The built-in agent can create widgets, arrange windows, prepare progress displays, and launch local scripts. It cannot inspect or change arbitrary files, inject arbitrary shell commands, or automatically instrument a script. Use an IDE agent for code edits. Every script launch requires explicit approval of the exact path, arguments, and display mode. Generated widget buttons can call only XR Shell's local allowlisted actions; they are not unrestricted MCP clients.
+The built-in agent can create widgets, arrange windows, prepare progress displays, and launch local scripts or CLI executables. It cannot edit files, inject shell expressions or pipelines, or automatically instrument a script. A CLI tool may itself modify files, so check the exact executable, arguments, and working directory in the required approval dialog. Use an IDE agent for code edits. Generated widget buttons can call only XR Shell's local allowlisted actions; they are not unrestricted MCP clients.
 
 ## Script-control widget
 
@@ -79,6 +80,6 @@ Text fields and selectors supply string arguments. A checkbox can conditionally 
 ## Boundaries
 
 - XR Shell MCP is local-only; it does not open a TCP port. Script progress uses its own user-only Unix socket.
-- Launching a macOS `.app` is distinct from launching a script. Scripts are limited to the supported extensions and always ask for approval. Terminal mode uses an XR Shell-generated temporary `.command` launcher, so it runs in a shell; arguments are individually quoted rather than interpolated as an arbitrary command string.
+- Launching a macOS `.app` is distinct from launching a script or CLI executable. Scripts are limited to the supported extensions; CLI commands resolve to an executable file and do not evaluate shell syntax. Both always ask for approval. Terminal mode uses an XR Shell-generated temporary `.command` launcher, so arguments are individually quoted rather than interpolated as an arbitrary command string.
 - A script runs from its own directory with the current macOS user's permissions. If it uses a progress widget, it should send `start`, `update`, and `finish` through the progress CLI; XR Shell does not infer loop progress from process output. Terminal output stays in Terminal; background output is available from `xr_shell_script_status`.
 - The shared macOS menu and app input are interactive UI features, not general-purpose MCP tools for agent automation.

@@ -183,11 +183,11 @@ async function handleControlRequest(method, params = {}) {
       if (job.status === 'running') throw new Error('This progress job is already running');
     }
     const choice = await dialog.showMessageBox(mainWindow, {
-      type: 'warning', buttons: ['Cancel', 'Run Script'], defaultId: 0, cancelId: 0, noLink: true,
-      title: 'XR Shell script approval', message: 'Allow XR Shell to run this local script?',
-      detail: `Script: ${request.scriptPath}\nArguments: ${JSON.stringify(request.args)}\nDisplay: ${request.display === 'terminal' ? 'macOS Terminal, attached to XR Shell' : 'background'}\nProgress: ${request.jobId || 'none'}\n\nThis script will run with your macOS user permissions.`
+      type: 'warning', buttons: ['Cancel', 'Run'], defaultId: 0, cancelId: 0, noLink: true,
+      title: 'XR Shell command approval', message: `Allow XR Shell to run this ${request.kind}?`,
+      detail: `Executable: ${request.command}\nArguments: ${JSON.stringify(request.commandArgs)}\nWorking directory: ${request.cwd}\nDisplay: ${request.display === 'terminal' ? 'macOS Terminal, attached to XR Shell' : 'background'}\nProgress: ${request.jobId || 'none'}\n\nThis will run with your macOS user permissions.`
     });
-    if (choice.response !== 1) throw new Error('Script launch cancelled');
+    if (choice.response !== 1) throw new Error('Launch cancelled');
     if (request.display === 'background') return scriptRunner.launch(request);
     const previousIds = new Set((await availableApplicationWindows(false)).map((source) => source.id));
     const run = await scriptRunner.launchTerminal(request, openTerminalLauncher);

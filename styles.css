@@ -50,6 +50,8 @@ body[data-shell-theme] .controls { padding: 7px 10px; border: 1px solid color-mi
 #shell-theme-picker { width: 190px; max-width: 190px; border-color: color-mix(in srgb, var(--cyan) 42%, transparent); }
 #add-window, #open-display { white-space: nowrap; }
 #add-window { border-color: rgba(84, 221, 255, .55); background: rgba(29, 137, 180, .17); }
+#focus-agent { border-color: color-mix(in srgb, var(--cyan) 65%, transparent); color: var(--ink); }
+#focus-agent[aria-pressed="true"] { background: var(--cyan-soft); box-shadow: 0 0 18px var(--cyan-soft); }
 
 .viewport { position: fixed; inset: 84px 0 76px; overflow: hidden; perspective: 1100px; }
 .workspace { position: absolute; left: 50%; top: 50%; width: 225vw; height: 100%; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); transform: translate3d(-50%, -50%, 0); will-change: transform; }
@@ -116,7 +118,9 @@ body[data-shell-theme] .controls { padding: 7px 10px; border: 1px solid color-mi
 .spatial-menu-list .spatial-menu-list { top: -7px; left: calc(100% + 7px); }
 .spatial-menu-list .has-submenu:hover > .spatial-menu-list, .spatial-menu-list .has-submenu:focus-within > .spatial-menu-list { display: block; }
 .spatial-menu-separator { height: 1px; margin: 5px 4px; background: color-mix(in srgb, var(--menu-accent) 16%, transparent); }
-.captured-window { --slot-x: 0vw; --offset-x: 0px; --offset-y: 0px; --tilt: 0deg; position: absolute; left: 50%; top: 50%; width: var(--panel-width, min(43vw, 720px)); height: var(--panel-height, 70%); transform: translateX(calc(-50% + var(--slot-x) + var(--offset-x))) translateY(calc(-50% + var(--offset-y))) perspective(1100px) rotateY(var(--tilt)); display: grid; grid-template-rows: 54px 1fr 40px; overflow: hidden; pointer-events: auto; border: 0; border-radius: 0; clip-path: polygon(18px 0, calc(100% - 18px) 0, 100% 18px, 100% calc(100% - 18px), calc(100% - 18px) 100%, 18px 100%, 0 calc(100% - 18px), 0 18px); background: var(--shell-frame); box-shadow: inset 0 0 50px color-mix(in srgb, var(--cyan) 9%, transparent), 0 0 42px color-mix(in srgb, var(--cyan) 22%, transparent), 0 32px 100px rgba(0, 0, 0, .62); transition: transform .38s ease, width .3s ease, height .3s ease; }
+.captured-window { --slot-x: 0vw; --offset-x: 0px; --offset-y: 0px; --tilt: 0deg; --agent-shift-x: 0px; position: absolute; left: 50%; top: 50%; width: var(--panel-width, min(43vw, 720px)); height: var(--panel-height, 70%); transform: translateX(calc(-50% + var(--slot-x) + var(--offset-x) + var(--agent-shift-x))) translateY(calc(-50% + var(--offset-y))) perspective(1100px) rotateY(var(--tilt)); display: grid; grid-template-rows: 54px 1fr 40px; overflow: hidden; pointer-events: auto; border: 0; border-radius: 0; clip-path: polygon(18px 0, calc(100% - 18px) 0, 100% 18px, 100% calc(100% - 18px), calc(100% - 18px) 100%, 18px 100%, 0 calc(100% - 18px), 0 18px); background: var(--shell-frame); box-shadow: inset 0 0 50px color-mix(in srgb, var(--cyan) 9%, transparent), 0 0 42px color-mix(in srgb, var(--cyan) 22%, transparent), 0 32px 100px rgba(0, 0, 0, .62); transition: transform .38s ease, width .3s ease, height .3s ease; }
+.workspace.agent-focus .zone-center, .workspace.agent-focus .zone-mid-right { z-index: 13; }
+.workspace.agent-focus .captured-window { pointer-events: none; }
 .captured-window.frontmost { z-index: 500 !important; }
 .captured-window.frontmost::before { opacity: 1; filter: drop-shadow(0 0 7px var(--cyan)); }
 .captured-window.positioning { transition: none; }
