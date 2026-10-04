@@ -14,6 +14,7 @@ const tools = [
   { name: 'xr_shell_release_app', description: 'Release a captured app from XR Shell without closing the original macOS app.', inputSchema: { type: 'object', properties: { sourceId: { type: 'string' }, query: { type: 'string' } }, additionalProperties: false } },
   { name: 'xr_shell_open_layout', description: 'Open up to twelve macOS apps and place them in a specified XR layout. Missing apps launch automatically unless launch is false. Also creates a draggable, closable A2UI layout controller.', inputSchema: { type: 'object', required: ['apps'], properties: { title: { type: 'string' }, surfaceId: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, apps: { type: 'array', minItems: 1, maxItems: 12, items: { type: 'object', properties: { sourceId: { type: 'string' }, query: { type: 'string' }, app: { type: 'string' }, bundleId: { type: 'string' }, windowQuery: { type: 'string' }, launch: { type: 'boolean' }, waitMs: { type: 'number' }, x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' } }, additionalProperties: false } } }, additionalProperties: false } },
   { name: 'xr_shell_add_note', description: 'Add a draggable, closable floating note to the XR workspace using an A2UI surface.', inputSchema: { type: 'object', required: ['body'], properties: { title: { type: 'string' }, body: { type: 'string' }, surfaceId: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' } }, additionalProperties: false } },
+  { name: 'xr_shell_open_file', description: 'Ask the user to approve a local text, Markdown, or JSON file, then open it in a draggable, closable, saveable XR reader widget. File contents stay in XR Shell and are not returned to the agent.', inputSchema: { type: 'object', required: ['path'], properties: { path: { type: 'string', description: 'Absolute local file path.' }, surfaceId: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' } }, additionalProperties: false } },
   { name: 'xr_shell_progress_prepare', description: 'Create or reopen a draggable script-progress widget before a local IDE script runs. Returns the job ID and reporting commands; the script reports updates directly to a separate local Unix socket without agent turns.', inputSchema: { type: 'object', required: ['jobId'], properties: { jobId: { type: 'string', pattern: '^[A-Za-z_][A-Za-z0-9_.:-]{0,63}$' }, title: { type: 'string' }, view: { type: 'string', enum: ['remaining', 'eta', 'metrics'] } }, additionalProperties: false } },
   { name: 'xr_shell_progress_configure', description: 'Change a prepared script-progress widget view without changing how its script reports counts and metrics.', inputSchema: { type: 'object', required: ['jobId', 'view'], properties: { jobId: { type: 'string' }, view: { type: 'string', enum: ['remaining', 'eta', 'metrics'] } }, additionalProperties: false } },
   { name: 'xr_shell_progress_get', description: 'Read a prepared script-progress job including completed and remaining runs, ETA, status, and named metrics.', inputSchema: { type: 'object', required: ['jobId'], properties: { jobId: { type: 'string' } }, additionalProperties: false } },
@@ -29,7 +30,7 @@ function callShell(method, params) {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(defaultSocketPath());
     let buffer = '';
-    const timeoutMs = method === 'run_script' ? 180000 : ['launch_app', 'open_layout'].includes(method) ? 45000 : 12000;
+    const timeoutMs = ['run_script', 'open_file'].includes(method) ? 180000 : ['launch_app', 'open_layout'].includes(method) ? 45000 : 12000;
     const timeout = setTimeout(() => { socket.destroy(); reject(new Error('XR Shell did not respond')); }, timeoutMs);
     socket.setEncoding('utf8');
     socket.once('connect', () => socket.write(`${JSON.stringify({ id: 1, method, params })}\n`));
@@ -59,6 +60,7 @@ const methods = {
   xr_shell_release_app: 'release_app',
   xr_shell_open_layout: 'open_layout',
   xr_shell_add_note: 'add_note',
+  xr_shell_open_file: 'open_file',
   xr_shell_progress_prepare: 'progress_prepare',
   xr_shell_progress_configure: 'progress_configure',
   xr_shell_progress_get: 'progress_get',

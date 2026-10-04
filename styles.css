@@ -54,9 +54,9 @@ body[data-shell-theme] .controls { padding: 7px 10px; border: 1px solid color-mi
 #focus-agent[aria-pressed="true"] { background: var(--cyan-soft); box-shadow: 0 0 18px var(--cyan-soft); }
 
 .viewport { position: fixed; inset: 84px 0 76px; overflow: hidden; perspective: 1100px; }
-.workspace { position: absolute; left: 50%; top: 50%; width: 225vw; height: 100%; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); transform: translate3d(-50%, -50%, 0); will-change: transform; }
+.workspace { position: absolute; left: 50%; top: 50%; width: 225vw; height: 100%; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); transform: translate3d(-50%, -50%, 0); transform-style: preserve-3d; will-change: transform; }
 .workspace::before { content: ""; position: absolute; left: 50%; bottom: -62%; width: 58%; height: 90%; transform: translateX(-50%) perspective(600px) rotateX(68deg); border-radius: 50%; background: repeating-radial-gradient(ellipse at center, rgba(52, 186, 239, .14) 0 1px, transparent 1px 52px); opacity: .42; pointer-events: none; }
-.app-stage { position: absolute; inset: 0; z-index: 12; pointer-events: none; }
+.app-stage { position: absolute; inset: 0; z-index: 12; pointer-events: none; transform-style: preserve-3d; }
 .a2ui-stage { position: absolute; inset: 0; z-index: 550; pointer-events: none; }
 .a2ui-surface { --surface-x: 0px; --surface-y: 0px; --surface-width: 360px; position: absolute; left: 50%; top: 50%; width: var(--surface-width); max-height: min(70vh, 720px); display: grid; grid-template-rows: 46px minmax(0, 1fr) auto; transform: translateX(calc(-50% + var(--surface-x))) translateY(calc(-50% + var(--surface-y))); overflow: hidden; pointer-events: auto; border-radius: 12px; border-color: rgba(105,225,255,.4); background: linear-gradient(145deg, rgba(8,31,45,.96), rgba(3,13,22,.95)); box-shadow: inset 0 0 38px rgba(74,211,255,.07), 0 0 38px rgba(52,191,244,.2), 0 28px 80px rgba(0,0,0,.58); }
 .a2ui-surface::before { content: ''; position: absolute; inset: 0; z-index: 4; border-radius: inherit; pointer-events: none; background: linear-gradient(90deg, var(--cyan), transparent 16%, transparent 84%, var(--cyan)) top / 100% 1px no-repeat, linear-gradient(90deg, rgba(84,221,255,.6), transparent 30%, transparent 70%, rgba(84,221,255,.6)) bottom / 100% 1px no-repeat; opacity: .72; }
@@ -71,6 +71,19 @@ body[data-shell-theme] .controls { padding: 7px 10px; border: 1px solid color-mi
 .a2ui-surface-header button[data-a2ui-close] { width: 29px; padding: 0; border-color: rgba(255,111,133,.28); color: #dc96a4; background: rgba(120,25,42,.1); font-size: 17px; }
 .a2ui-surface-header button[data-a2ui-close]:hover { border-color: rgba(255,111,133,.62); color: #ffc1cb; background: rgba(170,35,57,.18); }
 .a2ui-surface-content { min-height: 0; padding: 15px; overflow: auto; }
+.file-reader { display: grid; gap: 10px; min-width: 0; color: var(--ink); }
+.file-reader-toolbar { display: flex; align-items: center; gap: 7px; }
+.file-reader-toolbar span { flex: 1; color: var(--cyan); font-size: 9px; letter-spacing: .12em; }
+.file-reader-path { display: block; overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.file-reader-plain, .file-reader-code { margin: 0; padding: 14px; overflow: auto; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: color-mix(in srgb, var(--shell-control) 82%, black); font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.file-reader-json { color: color-mix(in srgb, var(--cyan) 65%, var(--ink)); }
+.file-reader-markdown { min-width: 0; overflow-wrap: anywhere; }
+.file-reader-markdown h2, .file-reader-markdown h3, .file-reader-markdown h4, .file-reader-markdown h5, .file-reader-markdown h6 { margin: 16px 0 8px; color: var(--ink); font-weight: 500; }
+.file-reader-markdown h2 { font-size: 20px; }
+.file-reader-markdown h3 { font-size: 16px; }
+.file-reader-markdown p, .file-reader-markdown li { margin: 5px 0; color: var(--ink); font-size: 12px; line-height: 1.55; }
+.file-reader-markdown li { margin-left: 17px; list-style: disc; }
+.file-reader-markdown .file-reader-code { margin: 8px 0; }
 .a2ui-card, .a2ui-column { display: flex; flex-direction: column; gap: 10px; }
 .a2ui-row { display: flex; align-items: center; gap: 8px; }
 .a2ui-row > p { min-width: 0; flex: 1; }
@@ -118,7 +131,7 @@ body[data-shell-theme] .controls { padding: 7px 10px; border: 1px solid color-mi
 .spatial-menu-list .spatial-menu-list { top: -7px; left: calc(100% + 7px); }
 .spatial-menu-list .has-submenu:hover > .spatial-menu-list, .spatial-menu-list .has-submenu:focus-within > .spatial-menu-list { display: block; }
 .spatial-menu-separator { height: 1px; margin: 5px 4px; background: color-mix(in srgb, var(--menu-accent) 16%, transparent); }
-.captured-window { --slot-x: 0vw; --offset-x: 0px; --offset-y: 0px; --tilt: 0deg; --agent-shift-x: 0px; position: absolute; left: 50%; top: 50%; width: var(--panel-width, min(43vw, 720px)); height: var(--panel-height, 70%); transform: translateX(calc(-50% + var(--slot-x) + var(--offset-x) + var(--agent-shift-x))) translateY(calc(-50% + var(--offset-y))) perspective(1100px) rotateY(var(--tilt)); display: grid; grid-template-rows: 54px 1fr 40px; overflow: hidden; pointer-events: auto; border: 0; border-radius: 0; clip-path: polygon(18px 0, calc(100% - 18px) 0, 100% 18px, 100% calc(100% - 18px), calc(100% - 18px) 100%, 18px 100%, 0 calc(100% - 18px), 0 18px); background: var(--shell-frame); box-shadow: inset 0 0 50px color-mix(in srgb, var(--cyan) 9%, transparent), 0 0 42px color-mix(in srgb, var(--cyan) 22%, transparent), 0 32px 100px rgba(0, 0, 0, .62); transition: transform .38s ease, width .3s ease, height .3s ease; }
+.captured-window { --slot-x: 0vw; --offset-x: 0px; --offset-y: 0px; --tilt: 0deg; --depth: 0px; --agent-shift-x: 0px; position: absolute; left: 50%; top: 50%; width: var(--panel-width, min(43vw, 720px)); height: var(--panel-height, 70%); transform: translateX(calc(-50% + var(--slot-x) + var(--offset-x) + var(--agent-shift-x))) translateY(calc(-50% + var(--offset-y))) translateZ(var(--depth)) rotateY(var(--tilt)); display: grid; grid-template-rows: 54px 1fr 40px; overflow: hidden; pointer-events: auto; border: 0; border-radius: 0; clip-path: polygon(18px 0, calc(100% - 18px) 0, 100% 18px, 100% calc(100% - 18px), calc(100% - 18px) 100%, 18px 100%, 0 calc(100% - 18px), 0 18px); background: var(--shell-frame); box-shadow: inset 0 0 50px color-mix(in srgb, var(--cyan) 9%, transparent), 0 0 42px color-mix(in srgb, var(--cyan) 22%, transparent), 0 32px 100px rgba(0, 0, 0, .62); transition: transform .38s ease, width .3s ease, height .3s ease; }
 .workspace.agent-focus .zone-center, .workspace.agent-focus .zone-mid-right { z-index: 13; }
 .workspace.agent-focus .captured-window { pointer-events: none; }
 .captured-window.frontmost { z-index: 500 !important; }

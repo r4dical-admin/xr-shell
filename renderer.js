@@ -137,6 +137,7 @@ let menuRefreshSequence = 0;
 const a2uiStore = window.XR_A2UI.createStore();
 const progressJobs = window.XR_PROGRESS.createStore();
 const a2uiNodes = new Map();
+const fileViewerDocuments = new Map();
 const a2uiEvents = [];
 let a2uiEventSequence = 0;
 let a2uiFrontOrder = 0;
@@ -582,6 +583,8 @@ async function restoreSavedWidget(saved) {
     await handleAgentControl('open_layout', { ...saved.resumeAction.params, surfaceId: saved.surfaceId });
   } else if (saved.resumeAction?.method === 'progress_prepare') {
     await handleAgentControl('progress_prepare', saved.resumeAction.params);
+  } else if (saved.resumeAction?.method === 'open_file') {
+    await handleAgentControl('open_file', { ...saved.resumeAction.params, surfaceId: saved.surfaceId });
   } else {
     const messages = [
       { version: window.XR_A2UI.VERSION, createSurface: { surfaceId: saved.surfaceId, catalogId: saved.catalogId, theme: saved.theme, sendDataModel: saved.sendDataModel } },
@@ -800,8 +803,65 @@ function removeA2UISurface(surfaceId, emitClose = false) {
   record?.cleanup?.();
   record?.node.remove();
   a2uiNodes.delete(surfaceId);
+  fileViewerDocuments.delete(surfaceId);
   if (surface) window.XR_A2UI.applyMessages(a2uiStore, { version: window.XR_A2UI.VERSION, deleteSurface: { surfaceId } });
   if (widgetLibrary.open) renderWidgetLibrary();
+}
+
+function renderMarkdownDocument(content) {
+  const article = document.createElement('article');
+  article.className = 'file-reader-markdown';
+  let code = null;
+  for (const line of content.split(/\r?\n/)) {
+    if (/^\s*```/.test(line)) {
+      if (code) { article.append(code); code = null; }
+      else { code = document.createElement('pre'); code.className = 'file-reader-code'; }
+      continue;
+    }
+    if (code) { code.textContent += `${line}\n`; continue; }
+    if (!line.trim()) continue;
+    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+    const node = document.createElement(heading ? `h${Math.min(heading[1].length + 1, 6)}` : /^\s*[-*+]\s+/.test(line) ? 'li' : 'p');
+    node.textContent = heading ? heading[2] : node.tagName === 'LI' ? line.replace(/^\s*[-*+]\s+/, '') : line;
+    article.append(node);
+  }
+  if (code) article.append(code);
+  return article;
+}
+
+function renderFileViewer(surface, file) {
+  const root = document.createElement('div');
+  root.className = 'file-reader';
+  const toolbar = document.createElement('div');
+  toolbar.className = 'file-reader-toolbar';
+  const metadata = document.createElement('span');
+  metadata.textContent = `${file.format.toUpperCase()} · ${file.bytes.toLocaleString()} bytes`;
+  metadata.title = file.path;
+  const choose = document.createElement('button');
+  choose.type = 'button';
+  choose.textContent = 'CHOOSE FILE';
+  choose.addEventListener('click', async () => {
+    try { await handleAgentControl('open_file', { surfaceId: surface.surfaceId }); }
+    catch (error) { showA2UIActionFeedback(surface.surfaceId, error.message, true); }
+  });
+  const reload = document.createElement('button');
+  reload.type = 'button';
+  reload.textContent = 'RELOAD';
+  reload.addEventListener('click', async () => {
+    try { await handleAgentControl('open_file', { surfaceId: surface.surfaceId, path: file.path }); }
+    catch (error) { showA2UIActionFeedback(surface.surfaceId, error.message, true); }
+  });
+  toolbar.append(metadata, choose, reload);
+  const pathLabel = document.createElement('small');
+  pathLabel.className = 'file-reader-path';
+  pathLabel.textContent = file.path;
+  const content = file.format === 'markdown' ? renderMarkdownDocument(file.content) : document.createElement('pre');
+  if (file.format !== 'markdown') {
+    content.className = `file-reader-plain file-reader-${file.format}`;
+    content.textContent = file.content;
+  }
+  root.append(toolbar, pathLabel, content);
+  return root;
 }
 
 function bindA2UISurfaceDrag(surface, node) {
@@ -862,12 +922,14 @@ function renderA2UISurface(surfaceId) {
   }
   const { node } = record;
   const fallback = [...surface.components.values()].find((component) => component.component === 'Text');
+  const file = fileViewerDocuments.get(surfaceId);
   node.querySelector('header strong').textContent = String(surface.placement.title || resolveA2UIValue(fallback?.text, surface) || surfaceId).slice(0, 80);
+  if (file) node.querySelector('header small').textContent = 'LOCAL FILE · READ ONLY';
   const isSaved = savedA2UIWidgets.some((item) => item.surfaceId === surfaceId);
   const saveButton = node.querySelector('[data-a2ui-save]');
   saveButton.textContent = isSaved ? 'SAVED' : 'SAVE';
   saveButton.classList.toggle('saved', isSaved);
-  node.querySelector('.a2ui-surface-content').replaceChildren(renderA2UIComponent(surface, 'root'));
+  node.querySelector('.a2ui-surface-content').replaceChildren(file ? renderFileViewer(surface, file) : renderA2UIComponent(surface, 'root'));
   const ordinal = Math.max(0, a2uiNodes.size - 1);
   if (!Number.isFinite(surface.placement.x)) surface.placement.x = (ordinal % 3 - 1) * 360;
   if (!Number.isFinite(surface.placement.y)) surface.placement.y = (ordinal % 2) * 150 - 75;
@@ -885,6 +947,7 @@ function applyA2UI(messages, placement = {}) {
     record?.cleanup?.();
     record?.node.remove();
     a2uiNodes.delete(surfaceId);
+    fileViewerDocuments.delete(surfaceId);
   });
   result.changed.forEach(renderA2UISurface);
   return { ok: true, ...result, surfaces: window.XR_A2UI.summarize(a2uiStore) };
@@ -1078,9 +1141,11 @@ function layoutCapturedWindows() {
   const positions = window.XR_WINDOW_LAYOUT.horizontalSlots(items.length, virtualScale);
   items.forEach((item, index) => {
     const position = positions[index];
+    const pose = window.XR_WINDOW_LAYOUT.convexPanelPose(position);
     item.panel.dataset.slot = String(index);
     item.panel.style.setProperty('--slot-x', `${position}vw`);
-    item.panel.style.setProperty('--tilt', `${position === 0 ? 0 : position < 0 ? -2.5 : 2.5}deg`);
+    item.panel.style.setProperty('--tilt', `${pose.tilt}deg`);
+    item.panel.style.setProperty('--depth', `${pose.depth}px`);
   });
   if (workspace.classList.contains('agent-focus')) setAgentFocus(true);
 }
@@ -1119,6 +1184,27 @@ function resolveCapturedApp(params = {}) {
 
 async function handleAgentControl(method, params = {}) {
   if (method === 'run_script') return window.horizon.runScript(params);
+  if (method === 'open_file') {
+    const file = await window.horizon.openReadableFile(params.path);
+    if (!file) return { ok: false, cancelled: true };
+    const surfaceId = safeSurfaceId('file', params.surfaceId);
+    const existing = a2uiStore.surfaces.get(surfaceId);
+    if (existing && existing.resumeAction?.method !== 'open_file') throw new Error(`A2UI surface ID is already in use: ${surfaceId}`);
+    fileViewerDocuments.set(surfaceId, file);
+    if (!existing) applyA2UI([
+      { version: window.XR_A2UI.VERSION, createSurface: { surfaceId, catalogId: window.XR_A2UI.XR_CATALOG } },
+      { version: window.XR_A2UI.VERSION, updateComponents: { surfaceId, components: [
+        { id: 'root', component: 'Card', child: 'file_heading' },
+        { id: 'file_heading', component: 'Text', text: file.name }
+      ] } }
+    ], { title: file.name, x: params.x, y: params.y, width: params.width || 520 });
+    const surface = a2uiStore.surfaces.get(surfaceId);
+    surface.placement.title = file.name;
+    surface.resumeAction = { method: 'open_file', params: { path: file.path } };
+    renderA2UISurface(surfaceId);
+    if (savedA2UIWidgets.some((item) => item.surfaceId === surfaceId)) saveA2UISurface(surface, true);
+    return { ok: true, surfaceId, path: file.path, format: file.format, bytes: file.bytes };
+  }
   if (method === 'progress_prepare') {
     const surfaceId = progressSurfaceId(window.XR_PROGRESS.requireJobId(params.jobId));
     const existingSurface = a2uiStore.surfaces.get(surfaceId);
@@ -1237,7 +1323,11 @@ async function handleAgentControl(method, params = {}) {
   if (method === 'transform_app') {
     if (Number.isFinite(params.width) || Number.isFinite(params.height)) {
       captured.panel.dataset.manualSize = 'true';
+      const beforeWidth = captured.panel.offsetWidth;
+      const beforeHeight = captured.panel.offsetHeight;
       setPanelSize(captured.panel, Number.isFinite(params.width) ? params.width : captured.panel.offsetWidth, Number.isFinite(params.height) ? params.height : captured.panel.offsetHeight);
+      const resized = await resizeCapturedWindow(sourceId, captured.panel, beforeWidth, beforeHeight);
+      if (!resized.ok) throw new Error(`Original app could not resize: ${resized.error}`);
     }
     if (Number.isFinite(params.x)) {
       const x = clamp(params.x, -appStage.clientWidth * .42, appStage.clientWidth * .42);
@@ -1266,10 +1356,11 @@ function eventModifiers(event) {
 }
 
 function mediaPoint(event, video, clampOutside = false) {
-  const rect = video.getBoundingClientRect();
-  if (!rect.width || !rect.height) return null;
-  let x = (event.clientX - rect.left) / rect.width;
-  let y = (event.clientY - rect.top) / rect.height;
+  // The browser maps offsetX/Y through the panel's 3D transform. An axis-aligned
+  // getBoundingClientRect() does not, and misplaces clicks near curved edges.
+  if (event.target !== video || !video.offsetWidth || !video.offsetHeight) return null;
+  let x = event.offsetX / video.offsetWidth;
+  let y = event.offsetY / video.offsetHeight;
   if (!clampOutside && (x < 0 || x > 1 || y < 0 || y > 1)) return null;
   x = Math.max(0, Math.min(1, x));
   y = Math.max(0, Math.min(1, y));
@@ -1278,10 +1369,8 @@ function mediaPoint(event, video, clampOutside = false) {
 
 function updateXRCursor(surface, video, point, pressed = false) {
   const cursor = surface.querySelector('.xr-cursor');
-  const videoRect = video.getBoundingClientRect();
-  const surfaceRect = surface.getBoundingClientRect();
-  cursor.style.left = `${videoRect.left - surfaceRect.left + point.x * videoRect.width}px`;
-  cursor.style.top = `${videoRect.top - surfaceRect.top + point.y * videoRect.height}px`;
+  cursor.style.left = `${video.offsetLeft + point.x * video.offsetWidth}px`;
+  cursor.style.top = `${video.offsetTop + point.y * video.offsetHeight}px`;
   cursor.classList.toggle('pressed', pressed);
   cursor.classList.add('visible');
 }
@@ -1309,7 +1398,7 @@ function bindCapturedInput(sourceId, panel) {
     const point = video && mediaPoint(event, video);
     if (!point) return;
     event.preventDefault();
-    surface.setPointerCapture(event.pointerId);
+    video.setPointerCapture(event.pointerId);
     gesture = { button: event.button, clickCount: event.detail, startPoint: point, startX: event.clientX, startY: event.clientY, dragging: false };
     updateXRCursor(surface, video, point, true);
   });
@@ -1319,7 +1408,7 @@ function bindCapturedInput(sourceId, panel) {
     const now = performance.now();
     if (now - lastDragSent < 16) return;
     const video = surface.querySelector('video');
-    const dragging = Boolean(event.buttons && surface.hasPointerCapture(event.pointerId));
+    const dragging = Boolean(event.buttons && video?.hasPointerCapture(event.pointerId));
     const point = video && mediaPoint(event, video, dragging);
     if (!point) return;
     lastDragSent = now;
@@ -1348,7 +1437,7 @@ function bindCapturedInput(sourceId, panel) {
     }
     gesture = null;
     if (video && point) updateXRCursor(surface, video, point, false);
-    if (surface.hasPointerCapture(event.pointerId)) surface.releasePointerCapture(event.pointerId);
+    if (video?.hasPointerCapture(event.pointerId)) video.releasePointerCapture(event.pointerId);
   });
   surface.addEventListener('pointerleave', () => {
     if (!gesture) surface.querySelector('.xr-cursor').classList.remove('visible');
@@ -1539,6 +1628,29 @@ function setPanelSize(panel, width, height) {
   panel.style.setProperty('--panel-height', `${clamp(height, 280, maxHeight)}px`);
 }
 
+async function resizeCapturedWindow(sourceId, panel, beforeWidth, beforeHeight) {
+  const afterWidth = panel.offsetWidth;
+  const afterHeight = panel.offsetHeight;
+  if (Math.abs(afterWidth - beforeWidth) < 2 && Math.abs(afterHeight - beforeHeight) < 2) return { ok: true, unchanged: true };
+  const chrome = window.XR_WINDOW_LAYOUT.CHROME_HEIGHT;
+  try {
+    const result = await window.horizon.resizeWindow(sourceId, {
+      scaleX: afterWidth / beforeWidth,
+      scaleY: Math.max(1, afterHeight - chrome) / Math.max(1, beforeHeight - chrome)
+    });
+    if (!result?.ok) throw new Error(result?.error || 'native window rejected resize');
+    const appliedWidth = beforeWidth * result.width / result.beforeWidth;
+    const appliedHeight = chrome + (beforeHeight - chrome) * result.height / result.beforeHeight;
+    if (Number.isFinite(appliedWidth) && Number.isFinite(appliedHeight)) setPanelSize(panel, appliedWidth, appliedHeight);
+    trackingState.textContent = `Resized original app window to ${Math.round(result.width)} × ${Math.round(result.height)}`;
+    return result;
+  } catch (error) {
+    setPanelSize(panel, beforeWidth, beforeHeight);
+    trackingState.textContent = `Original app could not resize · ${error.message}`;
+    return { ok: false, error: error.message };
+  }
+}
+
 function bindSpatialControls(sourceId, panel) {
   const header = panel.querySelector('header');
   const grip = panel.querySelector('.resize-grip');
@@ -1549,7 +1661,6 @@ function bindSpatialControls(sourceId, panel) {
     event.preventDefault();
     event.stopPropagation();
     selectCapture(sourceId, panel);
-    const rect = panel.getBoundingClientRect();
     gesture = {
       mode,
       pointerId: event.pointerId,
@@ -1558,8 +1669,8 @@ function bindSpatialControls(sourceId, panel) {
       startY: event.clientY,
       offsetX: Number(panel.dataset.offsetX || 0),
       offsetY: Number(panel.dataset.offsetY || 0),
-      width: rect.width,
-      height: rect.height
+      width: panel.offsetWidth,
+      height: panel.offsetHeight
     };
     event.currentTarget.setPointerCapture(event.pointerId);
     panel.classList.add('positioning');
@@ -1594,13 +1705,14 @@ function bindSpatialControls(sourceId, panel) {
 
   const finish = (event) => {
     if (!gesture || (Number.isFinite(event.pointerId) && event.pointerId !== gesture.pointerId)) return;
-    const { captureTarget, pointerId } = gesture;
+    const { captureTarget, pointerId, mode, width, height } = gesture;
     const shouldRaise = event.type === 'pointerup';
     gesture = null;
     panel.classList.remove('positioning');
     try {
       if (captureTarget.hasPointerCapture(pointerId)) captureTarget.releasePointerCapture(pointerId);
     } catch { /* pointer capture may already have been released by the OS */ }
+    if (mode === 'resize') resizeCapturedWindow(sourceId, panel, width, height);
     if (shouldRaise) setTimeout(() => raiseNativeWindow(sourceId, true), 0);
   };
 
@@ -1626,13 +1738,17 @@ function bindSpatialControls(sourceId, panel) {
 
   panel.querySelector('[data-smaller]').addEventListener('click', () => {
     panel.dataset.manualSize = 'true';
-    const rect = panel.getBoundingClientRect();
-    setPanelSize(panel, rect.width * 0.88, rect.height * 0.88);
+    const width = panel.offsetWidth;
+    const height = panel.offsetHeight;
+    setPanelSize(panel, width * 0.88, window.XR_WINDOW_LAYOUT.CHROME_HEIGHT + (height - window.XR_WINDOW_LAYOUT.CHROME_HEIGHT) * 0.88);
+    resizeCapturedWindow(sourceId, panel, width, height);
   });
   panel.querySelector('[data-larger]').addEventListener('click', () => {
     panel.dataset.manualSize = 'true';
-    const rect = panel.getBoundingClientRect();
-    setPanelSize(panel, rect.width * 1.12, rect.height * 1.12);
+    const width = panel.offsetWidth;
+    const height = panel.offsetHeight;
+    setPanelSize(panel, width * 1.12, window.XR_WINDOW_LAYOUT.CHROME_HEIGHT + (height - window.XR_WINDOW_LAYOUT.CHROME_HEIGHT) * 1.12);
+    resizeCapturedWindow(sourceId, panel, width, height);
   });
 }
 
@@ -1654,6 +1770,9 @@ document.getElementById('refresh-windows').addEventListener('click', async (even
 document.getElementById('open-widgets').addEventListener('click', () => {
   renderWidgetLibrary();
   widgetLibrary.showModal();
+});
+document.getElementById('open-file-reader').addEventListener('click', () => {
+  handleAgentControl('open_file').catch((error) => { trackingState.textContent = `Could not open file · ${error.message}`; });
 });
 widgetLibrary.querySelector('[data-widgets-close]').addEventListener('click', () => widgetLibrary.close());
 document.getElementById('fullscreen').addEventListener('click', () => window.horizon.toggleFullscreen());

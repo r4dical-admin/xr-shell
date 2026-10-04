@@ -24,6 +24,12 @@ test('command deck can prepare a widget and launch its script in order', () => {
   assert.match(commandDeckPrompt('Run batch'), /Progress is optional/);
 });
 
+test('command deck can request a user-approved file reader widget', () => {
+  const result = extractShellActions('<xr-shell-action>{"tool":"xr_shell_open_file","arguments":{"path":"/tmp/readme.md"}}</xr-shell-action>');
+  assert.equal(result.actions[0].method, 'open_file');
+  assert.match(commandDeckPrompt('Open a file'), /xr_shell_open_file/);
+});
+
 test('command deck prompt carries state and prevents app permission detours', () => {
   const prompt = commandDeckPrompt('Create a note', { apps: [{ name: 'Calculator' }] });
   assert.match(prompt, /host-mediated action protocol/);
@@ -49,7 +55,7 @@ test('chat backend flag defaults to Codex and accepts Cursor forms', () => {
 
 test('Cursor invocation is non-interactive, read-only, and resumable', () => {
   const fresh = backendInvocation('cursor', { prompt: 'hello', workingDirectory: '/tmp/project' });
-  assert.deepEqual(fresh, ['-p', '--output-format', 'stream-json', '--mode=ask', '--sandbox=enabled', 'hello']);
+  assert.deepEqual(fresh, ['-p', '--output-format', 'stream-json', '--mode=ask', '--sandbox=enabled', '--trust', 'hello']);
   const resumed = backendInvocation('cursor', { threadId: 'session-123', prompt: 'again', workingDirectory: '/tmp/project' });
   assert.ok(resumed.includes('--resume=session-123'));
   assert.equal(resumed.at(-1), 'again');
@@ -60,6 +66,7 @@ test('Cursor stream events expose sessions, status, final text, and errors', () 
   assert.deepEqual(cursorEvent({ type: 'tool_call', subtype: 'started' }), { status: 'tool_call' });
   assert.deepEqual(cursorEvent({ type: 'result', subtype: 'success', result: 'Done', session_id: 'cursor-1' }), { threadId: 'cursor-1', message: 'Done' });
   assert.deepEqual(cursorEvent({ type: 'result', subtype: 'error', is_error: true, result: 'Nope' }), { error: 'Nope' });
+  assert.deepEqual(cursorEvent({ type: 'error', error: { message: 'Login required' } }), { error: 'Login required' });
 });
 
 test('Cursor backend executes host-mediated XR actions from the final result', async () => {

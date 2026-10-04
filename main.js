@@ -12,6 +12,7 @@ const { ProfileStore, diffSnapshots } = require('./profile-store');
 const { ProfileObserver } = require('./profile-observer');
 const { ChatRunner, parseBackend } = require('./chat-runner');
 const { ScriptRunner, scriptRequest } = require('./script-runner');
+const { readReadableFile } = require('./file-reader');
 
 let mainWindow;
 let chatRunner;
@@ -163,7 +164,7 @@ function requestRendererControl(method, params = {}) {
   if (!mainWindow || mainWindow.isDestroyed()) return Promise.reject(new Error('XR Shell window is not ready'));
   const id = ++controlSequence;
   return new Promise((resolve, reject) => {
-    const timeoutMs = ['launch_app', 'open_layout'].includes(method) ? 45000 : 10000;
+    const timeoutMs = method === 'open_file' ? 180000 : ['launch_app', 'open_layout'].includes(method) ? 45000 : 10000;
     const timeout = setTimeout(() => {
       controlPending.delete(id);
       reject(new Error(`XR Shell control timed out: ${method}`));
@@ -378,6 +379,27 @@ app.whenReady().then(() => {
   ipcMain.handle('input:open-settings', () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'));
   ipcMain.handle('app:launch', (_event, params) => launchApplicationWindow(params || {}));
   ipcMain.handle('script:run', (_event, params) => handleControlRequest('run_script', params || {}));
+  ipcMain.handle('file:open', async (_event, requestedPath) => {
+    let filePath = requestedPath;
+    if (filePath) {
+      if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) throw new Error('Choose an absolute local file path');
+      filePath = fs.realpathSync(filePath);
+      const choice = await dialog.showMessageBox(mainWindow, {
+        type: 'question', buttons: ['Cancel', 'Open file'], defaultId: 0, cancelId: 0, noLink: true,
+        title: 'XR Shell file reader', message: 'Open this local file in an XR widget?',
+        detail: filePath.slice(0, 1000)
+      });
+      if (choice.response !== 1) return null;
+    } else {
+      const choice = await dialog.showOpenDialog(mainWindow, {
+        title: 'Open a text, Markdown, or JSON file', properties: ['openFile'],
+        filters: [{ name: 'Readable files', extensions: ['txt', 'text', 'log', 'md', 'markdown', 'json'] }]
+      });
+      if (choice.canceled || !choice.filePaths.length) return null;
+      filePath = choice.filePaths[0];
+    }
+    return readReadableFile(filePath);
+  });
   ipcMain.handle('menu:snapshot', async (_event, sourceId) => {
     const windowId = sourceWindowId(sourceId);
     return windowId === null ? { ok: false, error: 'invalid-window-source' } : inspectionBridge.request({ type: 'menu-snapshot', windowId });
@@ -428,6 +450,16 @@ app.whenReady().then(() => {
   ipcMain.handle('window:raise', (_event, sourceId) => {
     const windowId = sourceWindowId(sourceId);
     return windowId === null ? { ok: false, error: 'invalid-window-source' } : inputBridge.request({ type: 'raise-window', windowId });
+  });
+  ipcMain.handle('window:resize', (_event, sourceId, dimensions) => {
+    const windowId = sourceWindowId(sourceId);
+    if (windowId === null) return { ok: false, error: 'invalid-window-source' };
+    const scaleX = Number(dimensions?.scaleX);
+    const scaleY = Number(dimensions?.scaleY);
+    if (!Number.isFinite(scaleX) || !Number.isFinite(scaleY) || scaleX < .1 || scaleX > 10 || scaleY < .1 || scaleY > 10) {
+      return { ok: false, error: 'invalid-resize-scale' };
+    }
+    return inputBridge.request({ type: 'resize-window', windowId, scaleX, scaleY });
   });
   ipcMain.handle('window:metrics', (_event, sourceId) => {
     const windowId = sourceWindowId(sourceId);

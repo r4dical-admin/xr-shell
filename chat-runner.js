@@ -16,6 +16,7 @@ const ACTION_METHODS = Object.freeze({
   xr_shell_release_app: 'release_app',
   xr_shell_open_layout: 'open_layout',
   xr_shell_add_note: 'add_note',
+  xr_shell_open_file: 'open_file',
   xr_shell_progress_prepare: 'progress_prepare',
   xr_shell_progress_configure: 'progress_configure',
   xr_shell_run_script: 'run_script',
@@ -54,6 +55,7 @@ Action tag format:
 
 Allow-listed actions:
 - xr_shell_add_note: {title?, body (required), surfaceId?, x?, y?, width?}
+- xr_shell_open_file: {path (required absolute local .txt/.text/.log/.md/.markdown/.json file), surfaceId?, x?, y?, width?}. The user confirms the exact path; file contents remain inside XR Shell and are not returned to you. Do not guess a path.
 - xr_shell_progress_prepare: {jobId (required, stable identifier shared with the script), title?, view?: remaining|eta|metrics}. Creates a waiting widget. Tell the user which jobId to instrument in their IDE script; it reports via the dedicated local progress command, not through the agent.
 - xr_shell_progress_configure: {jobId, view: remaining|eta|metrics}. Changes an existing progress widget without changing its script.
 - xr_shell_run_script: {scriptPath OR command, args?: string[], cwd?: absolute directory (commands only), display?: background|terminal, jobId?, title?, x?, y?, width?, height?}. scriptPath must be an existing absolute .py/.js/.mjs/.cjs/.sh file. command is a single executable name (for example "git" with args ["status"]) or an absolute executable path; never a shell command string or pipeline. Progress is optional; include jobId only when the process reports progress. Use display:"terminal" when the user wants an attached macOS Terminal window; otherwise output is captured in the background. XR Shell asks the user to approve the resolved executable, arguments, and working directory. Do not guess an unknown script path or working directory, and do not claim you edited/instrumented a script.
@@ -120,6 +122,7 @@ function backendInvocation(backend, { threadId, prompt, workingDirectory }) {
       '--output-format', 'stream-json',
       '--mode=ask',
       '--sandbox=enabled',
+      '--trust',
       ...(threadId ? [`--resume=${threadId}`] : []),
       prompt
     ];
@@ -134,8 +137,9 @@ function cursorEvent(event) {
   if (event.type === 'system' && event.subtype === 'init') return { threadId: event.session_id, status: 'working' };
   if (event.type === 'assistant') return { status: 'working' };
   if (event.type === 'tool_call' && event.subtype === 'started') return { status: 'tool_call' };
+  if (event.type === 'error') return { error: String(event.error?.message || event.message || 'Cursor Agent failed') };
   if (event.type === 'result') {
-    if (event.is_error || event.subtype === 'error') return { error: String(event.result || event.error || 'Cursor Agent turn failed') };
+    if (event.is_error || event.subtype === 'error') return { error: String(event.error?.message || event.result || event.error || 'Cursor Agent turn failed') };
     return { threadId: event.session_id, message: String(event.result || '') };
   }
   return {};
@@ -184,7 +188,7 @@ class ChatRunner {
         actionWork = actionWork.then(async () => {
           for (const action of parsed.actions) {
             const result = await this.executeAction(action.method, action.arguments);
-            if (action.method === 'run_script') this.onEvent({ clientId, type: 'message', text: `Started ${result.scriptPath}${result.jobId ? ` for ${result.jobId}` : ''} in ${result.display}${result.attached ? ' (attached to XR)' : ''} (run ${result.runId}).${result.warning ? ` ${result.warning}` : ''}` });
+            if (action.method === 'run_script') this.onEvent({ clientId, type: 'message', text: `Started ${result.scriptPath || result.command}${result.jobId ? ` for ${result.jobId}` : ''} in ${result.display}${result.attached ? ' (attached to XR)' : ''} (run ${result.runId}).${result.warning ? ` ${result.warning}` : ''}` });
           }
         }).catch((error) => { actionError ||= error; });
       }
@@ -192,7 +196,11 @@ class ChatRunner {
     const lines = readline.createInterface({ input: child.stdout });
     lines.on('line', (line) => {
       let event;
-      try { event = JSON.parse(line); } catch { return; }
+      try { event = JSON.parse(line); }
+      catch {
+        if (this.backend === 'cursor') cursorOutput = `${cursorOutput}${line}\n`.slice(-2000);
+        return;
+      }
       if (this.backend === 'cursor') {
         const normalized = cursorEvent(event);
         emitThread(normalized.threadId);
@@ -202,7 +210,10 @@ class ChatRunner {
           cursorText += parts.filter((part) => part?.type === 'text').map((part) => part.text || '').join('');
         }
         if (normalized.error) backendError = normalized.error;
-        if (event.type === 'result' && !normalized.error) handleResponse(normalized.message || cursorText);
+        if (event.type === 'result') {
+          cursorResultSeen = true;
+          if (!normalized.error) handleResponse(normalized.message || cursorText);
+        }
         return;
       }
       if (event.type === 'thread.started') emitThread(event.thread_id);
@@ -211,18 +222,29 @@ class ChatRunner {
       if (event.type === 'turn.failed') backendError = event.error?.message || 'Agent turn failed';
     });
     let stderr = '';
+    let cursorOutput = '';
+    let cursorResultSeen = false;
+    let finished = false;
     child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-2000); });
     child.once('exit', async (code) => {
+      if (finished) return;
+      finished = true;
+      if (this.backend === 'cursor' && code === 0 && !cursorResultSeen && cursorText.trim()) {
+        cursorResultSeen = true;
+        handleResponse(cursorText);
+      }
       await actionWork;
       if (actionError) this.onEvent({ clientId, type: 'error', error: `XR Shell action failed: ${actionError.message}` });
       this.processes.delete(clientId);
-      if (code === 0 && !backendError && !actionError) this.onEvent({ clientId, type: 'done' });
+      if (code === 0 && !backendError && !actionError && (this.backend !== 'cursor' || cursorResultSeen)) this.onEvent({ clientId, type: 'done' });
       else if (!actionError) {
         const label = this.backend === 'cursor' ? 'Cursor Agent' : 'Codex';
-        this.onEvent({ clientId, type: 'error', error: backendError || stderr.trim() || `${label} exited with status ${code}` });
+        this.onEvent({ clientId, type: 'error', error: backendError || stderr.trim() || cursorOutput.trim() || (this.backend === 'cursor' && code === 0 ? 'Cursor Agent returned no response. Check Cursor CLI login and workspace trust.' : `${label} exited with status ${code}`) });
       }
     });
     child.once('error', (error) => {
+      if (finished) return;
+      finished = true;
       this.processes.delete(clientId);
       const hint = this.backend === 'cursor' && error.code === 'ENOENT' ? ' Install Cursor CLI or set XR_CURSOR_CLI to its executable path.' : '';
       this.onEvent({ clientId, type: 'error', error: `${error.message}${hint}` });

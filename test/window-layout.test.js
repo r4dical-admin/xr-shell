@@ -2,7 +2,15 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { MAX_HORIZONTAL_SCALE, containedMediaRect, fittedPanelSize, horizontalSlots, manualPanelLimits, resizedPanelSize, requiredHorizontalScale } = require('../window-layout');
+const { MAX_HORIZONTAL_SCALE, containedMediaRect, fittedPanelSize, horizontalSlots, manualPanelLimits, resizedPanelSize, requiredHorizontalScale, convexPanelPose } = require('../window-layout');
+
+test('captured apps form a convex arc with the center closest to the viewer', () => {
+  assert.deepEqual(convexPanelPose(0), { tilt: 0, depth: 0 });
+  assert.ok(convexPanelPose(-48).tilt < 0);
+  assert.ok(convexPanelPose(48).tilt > 0);
+  assert.ok(convexPanelPose(-48).depth < 0);
+  assert.equal(convexPanelPose(-48).depth, convexPanelPose(48).depth);
+});
 
 test('captured wrappers preserve the source dimensions while fitting the XR stage', () => {
   assert.deepEqual(fittedPanelSize(800, 600, 3000, 1000), { width: 800, height: 694 });

@@ -8,6 +8,7 @@ XR Shell has two agent entry points: its built-in command deck and the local MCP
 | Bring in apps | `xr_shell_pull_app`, `xr_shell_launch_app` | Capture an existing window or launch a `.app` and attach its window. |
 | Arrange apps | `xr_shell_focus_app`, `xr_shell_transform_app`, `xr_shell_release_app`, `xr_shell_open_layout` | Focus, move, resize, release, or open a multi-app layout. |
 | Add spatial information | `xr_shell_add_note`, `xr_shell_a2ui_apply` | Create draggable, closable notes and custom widgets. Widgets can be saved to the local library. |
+| Read a local file | `xr_shell_open_file` | Ask the user to approve one text, Markdown, or JSON file and show it in a draggable, saveable, read-only widget. File contents are not returned to the agent. |
 | Observe widget interaction | `xr_shell_a2ui_capabilities`, `xr_shell_a2ui_events`, `xr_shell_a2ui_delete` | Discover supported components, read explicit user events, or remove a surface. |
 | Track a local script | `xr_shell_progress_prepare`, `xr_shell_progress_get`, `xr_shell_progress_configure` | Show remaining runs, ETA, and metrics; the script reports over a separate local socket. |
 | Run a script or CLI command | `xr_shell_run_script`, `xr_shell_script_status` | Approve and launch an exact script or a regular executable with separate arguments, with or without progress. Run in the background or an attached macOS Terminal window. |
@@ -16,6 +17,7 @@ Examples you can ask the XR Shell agent:
 
 - “Open Terminal and Calculator side by side, then move Calculator slightly closer.”
 - “Add a floating note with the deployment checklist.”
+- “Open `/absolute/path/to/README.md` in a file-reader widget.”
 - “Create a widget for `/absolute/path/to/import.py` with an input field, a mode picker, a dry-run checkbox, and a Run button. Use job ID `data_import` and show remaining runs.”
 - “Prepare a progress widget for `data_import`, then run `/absolute/path/to/import.py` with `--mode fast`.”
 - “Run `/absolute/path/to/report.py --help` in the background without a progress widget.”

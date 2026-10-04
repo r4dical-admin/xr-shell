@@ -23,6 +23,14 @@
     return Array.from({ length: count }, (_value, index) => (index - (count - 1) / 2) * spacing);
   }
 
+  function convexPanelPose(position) {
+    const distance = Math.abs(Number(position) || 0) / 48;
+    return {
+      tilt: Math.sign(position) * Math.min(8, distance * 7),
+      depth: distance === 0 ? 0 : -Math.min(260, distance * distance * 80)
+    };
+  }
+
   function fittedPanelSize(mediaWidth, mediaHeight, stageWidth, stageHeight, cropTop = 0) {
     const sourceWidth = Math.max(1, Number(mediaWidth) || 1);
     const sourceHeight = Math.max(1, Number(mediaHeight) || 1);
@@ -76,5 +84,5 @@
     };
   }
 
-  return { MAX_WINDOWS, MAX_HORIZONTAL_SCALE, CHROME_HEIGHT, containedMediaRect, manualPanelLimits, resizedPanelSize, requiredHorizontalScale, horizontalSlots, fittedPanelSize };
+  return { MAX_WINDOWS, MAX_HORIZONTAL_SCALE, CHROME_HEIGHT, containedMediaRect, manualPanelLimits, resizedPanelSize, requiredHorizontalScale, horizontalSlots, fittedPanelSize, convexPanelPose };
 });

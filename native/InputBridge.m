@@ -247,6 +247,40 @@ static BOOL RaiseTargetWindow(uint32_t windowID) {
     return ok;
 }
 
+static NSDictionary *ResizeTargetWindow(uint32_t windowID, double scaleX, double scaleY) {
+    pid_t pid = 0;
+    CGRect bounds;
+    if (!WindowDetails(windowID, &pid, &bounds)) return @{ @"ok": @NO, @"error": @"source-window-unavailable" };
+    if (!isfinite(scaleX) || !isfinite(scaleY) || scaleX < 0.1 || scaleX > 10 || scaleY < 0.1 || scaleY > 10) {
+        return @{ @"ok": @NO, @"error": @"invalid-resize-scale" };
+    }
+    AXUIElementRef application = AXUIElementCreateApplication(pid);
+    AXUIElementSetMessagingTimeout(application, 1.0);
+    AXUIElementRef window = BestAccessibilityWindow(application, bounds);
+    CFRelease(application);
+    if (!window) return @{ @"ok": @NO, @"error": @"accessibility-window-unavailable" };
+    Boolean settable = false;
+    AXError check = AXUIElementIsAttributeSettable(window, kAXSizeAttribute, &settable);
+    if (check != kAXErrorSuccess || !settable) {
+        CFRelease(window);
+        return @{ @"ok": @NO, @"error": @"window-not-resizable" };
+    }
+    CGSize requested = CGSizeMake(round(fmax(300, fmin(4000, CGRectGetWidth(bounds) * scaleX))),
+                                  round(fmax(200, fmin(3000, CGRectGetHeight(bounds) * scaleY))));
+    AXValueRef value = AXValueCreate(kAXValueCGSizeType, &requested);
+    AXError error = value ? AXUIElementSetAttributeValue(window, kAXSizeAttribute, value) : kAXErrorFailure;
+    if (value) CFRelease(value);
+    CGSize actual = requested;
+    id actualValue = CopyAttribute(window, kAXSizeAttribute);
+    if (actualValue && CFGetTypeID((__bridge CFTypeRef)actualValue) == AXValueGetTypeID()) {
+        AXValueGetValue((__bridge AXValueRef)actualValue, kAXValueCGSizeType, &actual);
+    }
+    CFRelease(window);
+    if (error != kAXErrorSuccess) return @{ @"ok": @NO, @"error": @"native-window-resize-failed", @"axError": @(error) };
+    return @{ @"ok": @YES, @"beforeWidth": @(CGRectGetWidth(bounds)), @"beforeHeight": @(CGRectGetHeight(bounds)),
+              @"width": @(actual.width), @"height": @(actual.height) };
+}
+
 static NSDictionary *AccessibilitySnapshot(uint32_t windowID) {
     pid_t pid = 0;
     CGRect bounds;
@@ -723,6 +757,13 @@ int main(int argc, const char *argv[]) {
                 if ([type isEqualToString:@"raise-window"]) {
                     BOOL ok = RaiseTargetWindow([command[@"windowId"] unsignedIntValue]);
                     Emit(@{ @"id": requestID, @"ok": @(ok), @"error": ok ? NSNull.null : @"window-raise-failed" });
+                    continue;
+                }
+                if ([type isEqualToString:@"resize-window"]) {
+                    NSMutableDictionary *result = [ResizeTargetWindow([command[@"windowId"] unsignedIntValue],
+                        [command[@"scaleX"] doubleValue], [command[@"scaleY"] doubleValue]) mutableCopy];
+                    result[@"id"] = requestID;
+                    Emit(result);
                     continue;
                 }
                 if ([type isEqualToString:@"window-metrics"]) {
