@@ -9,6 +9,11 @@
   const MAX_HORIZONTAL_SCALE = 7;
   const CHROME_HEIGHT = 94;
 
+  function panelGap(widths) {
+    // Reserve room for the apparent width added by the workspace perspective.
+    return Math.max(48, Math.max(0, ...widths) * .06);
+  }
+
   function requiredHorizontalScale(count, currentScale) {
     const desired = 1.15 + Math.max(0, count) * 0.48;
     return Math.min(MAX_HORIZONTAL_SCALE, Math.max(Number(currentScale) || 1.5, Math.ceil(desired * 4) / 4));
@@ -23,12 +28,43 @@
     return Array.from({ length: count }, (_value, index) => (index - (count - 1) / 2) * spacing);
   }
 
-  function convexPanelPose(position) {
+  function horizontalSlotsForWidths(widths, viewportWidth, gap = panelGap(widths)) {
+    const safeWidths = widths.map((width) => Math.max(1, Number(width) || 1));
+    if (!safeWidths.length) return [];
+    const spacing = Math.max(0, Number(gap) || 0);
+    const total = safeWidths.reduce((sum, width) => sum + width, 0) + spacing * (safeWidths.length - 1);
+    let left = -total / 2;
+    return safeWidths.map((width) => {
+      const center = left + width / 2;
+      left += width + spacing;
+      return center * 100 / Math.max(1, Number(viewportWidth) || 1);
+    });
+  }
+
+  function requiredHorizontalScaleForWidths(widths, viewportWidth, currentScale, gap = panelGap(widths)) {
+    const total = widths.reduce((sum, width) => sum + Math.max(1, Number(width) || 1), 0)
+      + Math.max(0, widths.length - 1) * gap;
+    const desired = (total + Math.max(120, viewportWidth * .35)) / Math.max(1, viewportWidth);
+    return Math.min(MAX_HORIZONTAL_SCALE, Math.max(Number(currentScale) || 1.5, Math.ceil(desired * 4) / 4));
+  }
+
+  function concavePanelPose(position) {
     const distance = Math.abs(Number(position) || 0) / 48;
     return {
-      tilt: Math.sign(position) * Math.min(8, distance * 7),
-      depth: distance === 0 ? 0 : -Math.min(260, distance * distance * 80)
+      tilt: Math.sign(position) * Math.min(1.5, distance * 1.5),
+      depth: distance === 0 ? 0 : Math.min(12, distance * 12)
     };
+  }
+
+  function requiredCanvasScaleForPanel(panelExtent, viewportExtent, currentScale, maxScale, usableFraction) {
+    const desired = Math.ceil((Math.max(1, Number(panelExtent) || 1)
+      / (Math.max(1, Number(viewportExtent) || 1) * usableFraction)) * 4) / 4;
+    return Math.min(maxScale, Math.max(currentScale, desired));
+  }
+
+  function shouldZoomBeyondOriginal(width, height, originalWidth, originalHeight) {
+    return Number.isFinite(originalWidth) && Number.isFinite(originalHeight)
+      && (width > originalWidth + 2 || height > originalHeight + 2);
   }
 
   function fittedPanelSize(mediaWidth, mediaHeight, stageWidth, stageHeight, cropTop = 0) {
@@ -84,5 +120,5 @@
     };
   }
 
-  return { MAX_WINDOWS, MAX_HORIZONTAL_SCALE, CHROME_HEIGHT, containedMediaRect, manualPanelLimits, resizedPanelSize, requiredHorizontalScale, horizontalSlots, fittedPanelSize, convexPanelPose };
+  return { MAX_WINDOWS, MAX_HORIZONTAL_SCALE, CHROME_HEIGHT, containedMediaRect, manualPanelLimits, resizedPanelSize, requiredCanvasScaleForPanel, shouldZoomBeyondOriginal, requiredHorizontalScale, requiredHorizontalScaleForWidths, horizontalSlots, horizontalSlotsForWidths, fittedPanelSize, concavePanelPose };
 });

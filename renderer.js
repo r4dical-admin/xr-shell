@@ -93,6 +93,13 @@ const shellThemePicker = document.getElementById('shell-theme-picker');
 const chatBackend = new URLSearchParams(location.search).get('chatBackend') === 'cursor' ? 'cursor' : 'codex';
 const chatBackendName = chatBackend === 'cursor' ? 'Cursor Agent' : 'Codex';
 
+const HONORIFICS = ['Sir', 'Governor', 'Boss', 'Chief', 'Captain', 'Commander', 'Maestro', 'Skipper'];
+const previousHonorific = localStorage.getItem('xr-shell:last-honorific');
+const availableHonorifics = HONORIFICS.filter((name) => name !== previousHonorific);
+const honorific = availableHonorifics[Math.floor(Math.random() * availableHonorifics.length)];
+document.getElementById('welcome-line').textContent = `How can I help, ${honorific}?`;
+localStorage.setItem('xr-shell:last-honorific', honorific);
+
 document.getElementById('session-heading').textContent = `${chatBackendName.toUpperCase()} SESSIONS`;
 document.getElementById('chat-backend-intro').textContent = `Start a read-only ${chatBackendName} session from the command deck.`;
 
@@ -284,7 +291,11 @@ async function captureWindow(source) {
       if (!record) return;
       if (panel.dataset.manualSize !== 'true') {
         const size = window.XR_WINDOW_LAYOUT.fittedPanelSize(video.videoWidth, video.videoHeight, appStage.clientWidth, appStage.clientHeight, record.mediaCropTop);
-        setPanelSize(panel, size.width, size.height);
+        const chrome = window.XR_WINDOW_LAYOUT.CHROME_HEIGHT;
+        setPanelSize(panel, size.width * 1.18, chrome + (size.height - chrome) * 1.18);
+        record.initialPanelWidth = parseFloat(panel.style.getPropertyValue('--panel-width'));
+        record.initialPanelHeight = parseFloat(panel.style.getPropertyValue('--panel-height'));
+        layoutCapturedWindows();
       }
       requestAnimationFrame(() => {
         layoutCapturedMedia(panel, video, record.mediaCropTop);
@@ -1068,8 +1079,13 @@ function bindProfileControls(sourceId, panel) {
   const button = panel.querySelector('[data-profile]');
   const resizeObserver = new ResizeObserver(() => {
     const captured = capturedWindows.get(sourceId);
+    if (!captured) return;
     const video = panel.querySelector('video');
-    if (video && captured) layoutCapturedMedia(panel, video, captured.mediaCropTop);
+    if (video) layoutCapturedMedia(panel, video, captured.mediaCropTop);
+    if (captured.layoutWidth !== panel.offsetWidth) {
+      captured.layoutWidth = panel.offsetWidth;
+      layoutCapturedWindows();
+    }
   });
   resizeObserver.observe(panel);
   capturedWindows.get(sourceId).resizeObserver = resizeObserver;
@@ -1136,12 +1152,16 @@ function setAgentFocus(enabled) {
 
 function layoutCapturedWindows() {
   const items = [...capturedWindows.values()];
-  const requiredScale = window.XR_WINDOW_LAYOUT.requiredHorizontalScale(items.length, virtualScale);
+  const widths = items.map((item) => item.panel.offsetWidth);
+  const requiredScale = Math.max(
+    window.XR_WINDOW_LAYOUT.requiredHorizontalScale(items.length, virtualScale),
+    window.XR_WINDOW_LAYOUT.requiredHorizontalScaleForWidths(widths, window.innerWidth, virtualScale)
+  );
   if (requiredScale > virtualScale) setHorizontalScale(requiredScale);
-  const positions = window.XR_WINDOW_LAYOUT.horizontalSlots(items.length, virtualScale);
+  const positions = window.XR_WINDOW_LAYOUT.horizontalSlotsForWidths(widths, window.innerWidth);
   items.forEach((item, index) => {
     const position = positions[index];
-    const pose = window.XR_WINDOW_LAYOUT.convexPanelPose(position);
+    const pose = window.XR_WINDOW_LAYOUT.concavePanelPose(position);
     item.panel.dataset.slot = String(index);
     item.panel.style.setProperty('--slot-x', `${position}vw`);
     item.panel.style.setProperty('--tilt', `${pose.tilt}deg`);
@@ -1151,9 +1171,7 @@ function layoutCapturedWindows() {
 }
 
 function capturedLayoutItem(sourceId, captured) {
-  const slotIndex = Number(captured.panel.dataset.slot || 0);
-  const slots = window.XR_WINDOW_LAYOUT.horizontalSlots(capturedWindows.size, virtualScale);
-  const slotX = Math.round((slots[slotIndex] || 0) * window.innerWidth / 100);
+  const slotX = Math.round((parseFloat(captured.panel.style.getPropertyValue('--slot-x')) || 0) * window.innerWidth / 100);
   const x = Number(captured.panel.dataset.offsetX || 0);
   const y = Number(captured.panel.dataset.offsetY || 0);
   return {
@@ -1328,6 +1346,7 @@ async function handleAgentControl(method, params = {}) {
       setPanelSize(captured.panel, Number.isFinite(params.width) ? params.width : captured.panel.offsetWidth, Number.isFinite(params.height) ? params.height : captured.panel.offsetHeight);
       const resized = await resizeCapturedWindow(sourceId, captured.panel, beforeWidth, beforeHeight);
       if (!resized.ok) throw new Error(`Original app could not resize: ${resized.error}`);
+      layoutCapturedWindows();
     }
     if (Number.isFinite(params.x)) {
       const x = clamp(params.x, -appStage.clientWidth * .42, appStage.clientWidth * .42);
@@ -1622,16 +1641,41 @@ function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
+function availablePanelLimits() {
+  return window.XR_WINDOW_LAYOUT.manualPanelLimits(
+    window.innerWidth * Number(scaleInput.max),
+    viewport.clientHeight * Number(heightScaleInput.max)
+  );
+}
+
+function expandCanvasForPanel(width, height) {
+  const layout = window.XR_WINDOW_LAYOUT;
+  const widthScale = layout.requiredCanvasScaleForPanel(width, window.innerWidth, virtualScale, Number(scaleInput.max), .82);
+  const heightScale = layout.requiredCanvasScaleForPanel(height, viewport.clientHeight, virtualHeightScale, Number(heightScaleInput.max), .96);
+  if (widthScale > virtualScale) setHorizontalScale(widthScale);
+  if (heightScale > virtualHeightScale) setVerticalScale(heightScale);
+}
+
 function setPanelSize(panel, width, height) {
-  const { maxWidth, maxHeight } = window.XR_WINDOW_LAYOUT.manualPanelLimits(appStage.clientWidth, appStage.clientHeight);
-  panel.style.setProperty('--panel-width', `${clamp(width, 420, maxWidth)}px`);
-  panel.style.setProperty('--panel-height', `${clamp(height, 280, maxHeight)}px`);
+  const { maxWidth, maxHeight } = availablePanelLimits();
+  const nextWidth = clamp(width, 420, maxWidth);
+  const nextHeight = clamp(height, 280, maxHeight);
+  panel.style.setProperty('--panel-width', `${nextWidth}px`);
+  panel.style.setProperty('--panel-height', `${nextHeight}px`);
+  expandCanvasForPanel(nextWidth, nextHeight);
 }
 
 async function resizeCapturedWindow(sourceId, panel, beforeWidth, beforeHeight) {
-  const afterWidth = panel.offsetWidth;
-  const afterHeight = panel.offsetHeight;
+  const afterWidth = parseFloat(panel.style.getPropertyValue('--panel-width')) || panel.offsetWidth;
+  const afterHeight = parseFloat(panel.style.getPropertyValue('--panel-height')) || panel.offsetHeight;
   if (Math.abs(afterWidth - beforeWidth) < 2 && Math.abs(afterHeight - beforeHeight) < 2) return { ok: true, unchanged: true };
+  const captured = capturedWindows.get(sourceId);
+  const wasZoomed = window.XR_WINDOW_LAYOUT.shouldZoomBeyondOriginal(beforeWidth, beforeHeight, captured?.initialPanelWidth, captured?.initialPanelHeight);
+  const willBeZoomed = window.XR_WINDOW_LAYOUT.shouldZoomBeyondOriginal(afterWidth, afterHeight, captured?.initialPanelWidth, captured?.initialPanelHeight);
+  if (wasZoomed || willBeZoomed) {
+    trackingState.textContent = `XR view zoomed to ${Math.round(afterWidth)} × ${Math.round(afterHeight)} · original app unchanged`;
+    return { ok: true, mode: 'xr-zoom' };
+  }
   const chrome = window.XR_WINDOW_LAYOUT.CHROME_HEIGHT;
   try {
     const result = await window.horizon.resizeWindow(sourceId, {
@@ -1639,15 +1683,15 @@ async function resizeCapturedWindow(sourceId, panel, beforeWidth, beforeHeight) 
       scaleY: Math.max(1, afterHeight - chrome) / Math.max(1, beforeHeight - chrome)
     });
     if (!result?.ok) throw new Error(result?.error || 'native window rejected resize');
-    const appliedWidth = beforeWidth * result.width / result.beforeWidth;
-    const appliedHeight = chrome + (beforeHeight - chrome) * result.height / result.beforeHeight;
-    if (Number.isFinite(appliedWidth) && Number.isFinite(appliedHeight)) setPanelSize(panel, appliedWidth, appliedHeight);
-    trackingState.textContent = `Resized original app window to ${Math.round(result.width)} × ${Math.round(result.height)}`;
-    return result;
+    const nativeWidthMatched = Math.abs(result.width / result.beforeWidth - afterWidth / beforeWidth) < .03;
+    const nativeHeightMatched = Math.abs(result.height / result.beforeHeight - (afterHeight - chrome) / Math.max(1, beforeHeight - chrome)) < .03;
+    trackingState.textContent = nativeWidthMatched && nativeHeightMatched
+      ? `Resized app and XR view to ${Math.round(afterWidth)} × ${Math.round(afterHeight)}`
+      : `XR view zoomed to ${Math.round(afterWidth)} × ${Math.round(afterHeight)} · original app reached its size limit`;
+    return { ...result, mode: nativeWidthMatched && nativeHeightMatched ? 'native' : 'xr-zoom' };
   } catch (error) {
-    setPanelSize(panel, beforeWidth, beforeHeight);
-    trackingState.textContent = `Original app could not resize · ${error.message}`;
-    return { ok: false, error: error.message };
+    trackingState.textContent = `XR view zoomed to ${Math.round(afterWidth)} × ${Math.round(afterHeight)} · original app unchanged`;
+    return { ok: true, mode: 'xr-zoom', nativeError: error.message };
   }
 }
 
@@ -1678,15 +1722,11 @@ function bindSpatialControls(sourceId, panel) {
 
   const update = (event) => {
     if (!gesture || event.pointerId !== gesture.pointerId) return;
-    if ((event.buttons & 1) === 0) {
-      finish(event);
-      return;
-    }
     const dx = event.clientX - gesture.startX;
     const dy = event.clientY - gesture.startY;
     if (gesture.mode === 'resize') {
       panel.dataset.manualSize = 'true';
-      const limits = window.XR_WINDOW_LAYOUT.manualPanelLimits(appStage.clientWidth, appStage.clientHeight);
+      const limits = availablePanelLimits();
       const size = window.XR_WINDOW_LAYOUT.resizedPanelSize(gesture.width, gesture.height, dx, dy, limits);
       setPanelSize(panel, size.width, size.height);
       return;
@@ -1712,7 +1752,9 @@ function bindSpatialControls(sourceId, panel) {
     try {
       if (captureTarget.hasPointerCapture(pointerId)) captureTarget.releasePointerCapture(pointerId);
     } catch { /* pointer capture may already have been released by the OS */ }
-    if (mode === 'resize') resizeCapturedWindow(sourceId, panel, width, height);
+    if (mode === 'resize') {
+      resizeCapturedWindow(sourceId, panel, width, height).finally(layoutCapturedWindows);
+    }
     if (shouldRaise) setTimeout(() => raiseNativeWindow(sourceId, true), 0);
   };
 
@@ -1722,6 +1764,7 @@ function bindSpatialControls(sourceId, panel) {
   header.addEventListener('pointercancel', finish);
   grip.addEventListener('pointerdown', (event) => begin(event, 'resize'));
   grip.addEventListener('pointermove', update);
+  addEventListener('pointermove', update, true);
   grip.addEventListener('pointerup', finish);
   grip.addEventListener('pointercancel', finish);
   header.addEventListener('lostpointercapture', finish);
@@ -1731,6 +1774,7 @@ function bindSpatialControls(sourceId, panel) {
   const finishOnBlur = () => finish({});
   addEventListener('blur', finishOnBlur);
   capturedWindows.get(sourceId).spatialCleanup = () => {
+    removeEventListener('pointermove', update, true);
     removeEventListener('pointerup', finish, true);
     removeEventListener('pointercancel', finish, true);
     removeEventListener('blur', finishOnBlur);
@@ -1740,15 +1784,15 @@ function bindSpatialControls(sourceId, panel) {
     panel.dataset.manualSize = 'true';
     const width = panel.offsetWidth;
     const height = panel.offsetHeight;
-    setPanelSize(panel, width * 0.88, window.XR_WINDOW_LAYOUT.CHROME_HEIGHT + (height - window.XR_WINDOW_LAYOUT.CHROME_HEIGHT) * 0.88);
-    resizeCapturedWindow(sourceId, panel, width, height);
+    setPanelSize(panel, width * 0.82, window.XR_WINDOW_LAYOUT.CHROME_HEIGHT + (height - window.XR_WINDOW_LAYOUT.CHROME_HEIGHT) * 0.82);
+    layoutCapturedWindows();
   });
   panel.querySelector('[data-larger]').addEventListener('click', () => {
     panel.dataset.manualSize = 'true';
     const width = panel.offsetWidth;
     const height = panel.offsetHeight;
-    setPanelSize(panel, width * 1.12, window.XR_WINDOW_LAYOUT.CHROME_HEIGHT + (height - window.XR_WINDOW_LAYOUT.CHROME_HEIGHT) * 1.12);
-    resizeCapturedWindow(sourceId, panel, width, height);
+    setPanelSize(panel, width * 1.18, window.XR_WINDOW_LAYOUT.CHROME_HEIGHT + (height - window.XR_WINDOW_LAYOUT.CHROME_HEIGHT) * 1.18);
+    layoutCapturedWindows();
   });
 }
 
@@ -1837,13 +1881,16 @@ function setHorizontalScale(value) {
 scaleInput.addEventListener('input', () => {
   setHorizontalScale(scaleInput.value);
 });
-heightScaleInput.addEventListener('input', () => {
-  virtualHeightScale = Number(heightScaleInput.value);
+addEventListener('resize', layoutCapturedWindows);
+function setVerticalScale(value) {
+  virtualHeightScale = clamp(Number(value) || 1, Number(heightScaleInput.min), Number(heightScaleInput.max));
+  heightScaleInput.value = String(virtualHeightScale);
   workspace.style.height = `${virtualHeightScale * 100}%`;
   heightScaleOutput.value = `${virtualHeightScale.toFixed(2).replace(/0$/, '')}×`;
   canvasReadout.textContent = `${virtualScale.toFixed(2).replace(/0$/, '')}× width · ${virtualHeightScale.toFixed(2).replace(/0$/, '')}× height`;
   minimapView.style.height = `${100 / virtualHeightScale}%`;
-});
+}
+heightScaleInput.addEventListener('input', () => setVerticalScale(heightScaleInput.value));
 verticalTrimInput.addEventListener('input', () => {
   verticalTrimDegrees = clamp(Number(verticalTrimInput.value) || 0, -8, 8);
   verticalTrimOutput.value = `${verticalTrimDegrees > 0 ? '+' : ''}${verticalTrimDegrees}°`;

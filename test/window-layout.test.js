@@ -2,14 +2,29 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { MAX_HORIZONTAL_SCALE, containedMediaRect, fittedPanelSize, horizontalSlots, manualPanelLimits, resizedPanelSize, requiredHorizontalScale, convexPanelPose } = require('../window-layout');
+const { MAX_HORIZONTAL_SCALE, containedMediaRect, fittedPanelSize, horizontalSlots, horizontalSlotsForWidths, manualPanelLimits, resizedPanelSize, requiredCanvasScaleForPanel, shouldZoomBeyondOriginal, requiredHorizontalScale, requiredHorizontalScaleForWidths, concavePanelPose } = require('../window-layout');
 
-test('captured apps form a convex arc with the center closest to the viewer', () => {
-  assert.deepEqual(convexPanelPose(0), { tilt: 0, depth: 0 });
-  assert.ok(convexPanelPose(-48).tilt < 0);
-  assert.ok(convexPanelPose(48).tilt > 0);
-  assert.ok(convexPanelPose(-48).depth < 0);
-  assert.equal(convexPanelPose(-48).depth, convexPanelPose(48).depth);
+test('captured apps use a very shallow concave arc', () => {
+  assert.deepEqual(concavePanelPose(0), { tilt: 0, depth: 0 });
+  assert.ok(concavePanelPose(-48).tilt < 0);
+  assert.ok(concavePanelPose(48).tilt > 0);
+  assert.equal(concavePanelPose(-48).depth, 12);
+  assert.equal(concavePanelPose(-48).depth, concavePanelPose(48).depth);
+  assert.equal(concavePanelPose(500).tilt, 1.5);
+  assert.equal(concavePanelPose(500).depth, 12);
+});
+
+test('captured apps are spaced according to their measured widths', () => {
+  const widths = [800, 1200, 600];
+  const centers = horizontalSlotsForWidths(widths, 1000).map((vw) => vw * 10);
+  const gap = Math.max(48, Math.max(...widths) * .06);
+  assert.equal(centers[1] - centers[0], widths[0] / 2 + gap + widths[1] / 2);
+  assert.equal(centers[2] - centers[1], widths[1] / 2 + gap + widths[2] / 2);
+  assert.equal(horizontalSlotsForWidths([], 1000).length, 0);
+  assert.ok(requiredHorizontalScaleForWidths(widths, 1000, 1.5) >= 3);
+  const expanded = horizontalSlotsForWidths([1400, 1200, 900], 1000).map((vw) => vw * 10);
+  assert.ok(expanded[1] - expanded[0] > (1400 + 1200) / 2);
+  assert.ok(expanded[2] - expanded[1] > (1200 + 900) / 2);
 });
 
 test('captured wrappers preserve the source dimensions while fitting the XR stage', () => {
@@ -30,6 +45,16 @@ test('large native title regions can be cropped without distorting media geometr
 test('manual resizing can grow well beyond the native auto-fit limit', () => {
   assert.deepEqual(manualPanelLimits(3000, 1000), { maxWidth: 2460, maxHeight: 960 });
   assert.ok(manualPanelLimits(3000, 1000).maxWidth > fittedPanelSize(800, 600, 3000, 1000).width);
+  assert.equal(requiredCanvasScaleForPanel(1800, 1000, 1.5, 7, .82), 2.25);
+  assert.equal(requiredCanvasScaleForPanel(1800, 1000, 1, 2.5, .96), 2);
+  const zoomed = containedMediaRect(800, 600, 1600, 1200);
+  assert.equal(zoomed.scale, 2);
+  assert.equal(zoomed.width, 1600);
+  assert.equal(shouldZoomBeyondOriginal(1200, 900, 1000, 800), true);
+  assert.equal(shouldZoomBeyondOriginal(900, 700, 1000, 800), false);
+  const enlarged = resizedPanelSize(800, 694, 800, 0, manualPanelLimits(7000, 2500));
+  assert.deepEqual(enlarged, { width: 1600, height: 1294 });
+  assert.equal(shouldZoomBeyondOriginal(enlarged.width, enlarged.height, 800, 694), true);
 });
 
 test('corner resizing preserves captured content aspect ratio at window limits', () => {
