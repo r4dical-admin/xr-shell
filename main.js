@@ -22,10 +22,11 @@ let controlSequence = 0;
 const controlPending = new Map();
 const scriptRunner = new ScriptRunner();
 const PROFILE_DURATION_MS = Math.max(10000, Number(process.env.XR_PROFILE_DURATION_MS) || 60 * 1000);
-const inputBridge = new InputBridge();
-const inspectionBridge = new InputBridge();
-const statusBridge = new InputBridge();
-const profileStore = new ProfileStore(path.join(__dirname, 'integration-profiles'));
+const helperPath = app.isPackaged ? path.join(process.resourcesPath, 'input-bridge') : path.join(__dirname, '.build', 'input-bridge');
+const inputBridge = new InputBridge({ executablePath: helperPath });
+const inspectionBridge = new InputBridge({ executablePath: helperPath });
+const statusBridge = new InputBridge({ executablePath: helperPath });
+let profileStore;
 const profilers = new Map();
 const CHAT_BACKEND = parseBackend(process.argv);
 const tracker = new HeadTracker((value) => {
@@ -214,7 +215,7 @@ async function handleControlRequest(method, params = {}) {
   }
   const result = await requestRendererControl(method, params);
   if (method === 'progress_prepare') {
-    const cli = path.join(__dirname, 'bin', 'xr-shell-progress.js');
+    const cli = path.join(app.isPackaged ? process.resourcesPath : __dirname, 'bin', 'xr-shell-progress.js');
     return { ...result, reporting: { executable: 'node', script: cli, jobId: result.job.jobId,
       socket: progressSocketPath(), commands: {
         start: `node ${JSON.stringify(cli)} start --job ${result.job.jobId} --total <count>`,
@@ -317,7 +318,7 @@ async function startProfiler(sourceId) {
     state.rawEvents.push({ type: event.event, role: event.role, label: event.label, frame: event.frame, at: event.at, source: 'AXObserver' });
     if (state.rawEvents.length > 200) state.rawEvents.shift();
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('profile:event', { sourceId, event });
-  });
+  }, helperPath);
   state.observer.start();
   state.timer = setInterval(() => { captureProfilerUpdate(sourceId, state).catch(() => {}); }, 1400);
   state.deadlineTimer = setTimeout(() => { finishProfiler(sourceId).catch(() => {}); }, PROFILE_DURATION_MS);
@@ -347,12 +348,12 @@ function createWindow() {
     }
   });
   const previewTheme = String(process.env.XR_SHELL_THEME || '').trim();
-  mainWindow.loadFile('index.html', { query: { ...(previewTheme ? { shellTheme: previewTheme } : {}), chatBackend: CHAT_BACKEND } });
+  mainWindow.loadFile(path.join(__dirname, 'index.html'), { query: { ...(previewTheme ? { shellTheme: previewTheme } : {}), chatBackend: CHAT_BACKEND } });
   if (process.env.HORIZON_CAPTURE === '1') {
     mainWindow.webContents.once('did-finish-load', () => {
       setTimeout(async () => {
         const image = await mainWindow.webContents.capturePage();
-        const artifactDirectory = path.join(__dirname, 'artifacts');
+        const artifactDirectory = path.join(app.isPackaged ? app.getPath('userData') : __dirname, 'artifacts');
         fs.mkdirSync(artifactDirectory, { recursive: true });
         fs.writeFileSync(path.join(artifactDirectory, 'preview.png'), image.toPNG());
         app.quit();
@@ -363,10 +364,11 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  profileStore = new ProfileStore(path.join(app.isPackaged ? app.getPath('userData') : __dirname, 'integration-profiles'));
   chatRunner = new ChatRunner({
     backend: CHAT_BACKEND,
     homeDirectory: app.getPath('home'),
-    workingDirectory: __dirname,
+    workingDirectory: app.isPackaged ? app.getPath('home') : __dirname,
     getContext: () => handleControlRequest('list_apps'),
     executeAction: handleControlRequest,
     onEvent: (event) => {

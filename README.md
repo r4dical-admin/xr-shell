@@ -8,6 +8,8 @@ A native Electron proof of concept for a panoramic workspace that is wider than 
 
 **[Watch or download the 48-second XR Shell feature demo →](artifacts/xr-shell-demo.mp4)**
 
+**[Watch or download the spatial-motion demo →](artifacts/xr-shell-spatial-demo.mp4)** The capture shows the XR workspace panning, switching themes, and pulling in a live Terminal window. The earlier sample Planner and Metrics content is illustrative; the Terminal window and shell UI are real.
+
 The walkthrough highlights the panoramic head-tracked canvas, live macOS window capture, native input and spatial window controls, chat-to-A2UI widget creation, Codex and local MCP control, the shared application menu, and all five shell themes. Its app-specific reskin segment shows the archived prototype and no longer matches the current FX/Tint controls.
 
 Open macOS windows can be brought into the workspace as live, interactive surfaces. Choose a window in the top toolbar and select **Add app**. macOS requests Screen Recording permission the first time. The mirror receives futuristic spatial chrome, depth, scan lines, color treatment and glow without modifying the original application bundle.
@@ -19,6 +21,18 @@ cd /Users/ido/Documents/xr-shell
 npm install
 npm start
 ```
+
+### Unsigned macOS build
+
+On a Mac with Xcode Command Line Tools installed, run `npm install` and then:
+
+```bash
+npm run make:mac
+```
+
+Electron Forge builds the native input helper first and creates an unsigned `XR Shell.app`, DMG, and ZIP in `out/`. The DMG is for local testing, not a notarized public release. Open the DMG, drag **XR Shell.app** to **Applications**, and launch it from there. macOS may warn that it cannot verify the unsigned app; use Finder’s **Open** action if you trust this local build. A different copy or rebuild may require granting Screen Recording and Accessibility again. The packaged helper is at `/Applications/XR Shell.app/Contents/Resources/input-bridge`; use that path when manually adding it in Accessibility settings. The packaged app saves new AX profiles under its macOS application-support directory, not inside the read-only `.app`.
+
+For a packaged installation, point an MCP client at `/Applications/XR Shell.app/Contents/Resources/mcp/server.js` and use `/Applications/XR Shell.app/Contents/Resources/bin/xr-shell-progress.js` for script progress. Both still require Node.js installed separately. Codex or Cursor CLI is likewise required only for the corresponding chat backend; window capture and widgets work without either CLI.
 
 The command deck uses Codex by default. To use Cursor Agent instead, install and authenticate the Cursor CLI, then launch:
 

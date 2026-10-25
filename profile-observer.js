@@ -5,14 +5,15 @@ const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 
 class ProfileObserver {
-  constructor(windowId, onMessage) {
+  constructor(windowId, onMessage, executablePath = path.join(__dirname, '.build', 'input-bridge')) {
     this.windowId = windowId;
     this.onMessage = onMessage;
+    this.executablePath = executablePath;
   }
 
   start() {
     if (this.process) return;
-    this.process = spawn(path.join(__dirname, '.build', 'input-bridge'), ['--observe', String(this.windowId)], {
+    this.process = spawn(this.executablePath, ['--observe', String(this.windowId)], {
       stdio: ['ignore', 'pipe', 'pipe']
     });
     const lines = readline.createInterface({ input: this.process.stdout });

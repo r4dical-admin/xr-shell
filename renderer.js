@@ -445,7 +445,13 @@ function renderSpatialMenu(snapshot, sourceId) {
   const captured = capturedWindows.get(sourceId);
   spatialMenuBar.hidden = false;
   menuAppName.textContent = snapshot.app?.name || captured.source?.name || 'APP';
-  menuState.textContent = snapshot.ok ? 'AX MENU · LIVE' : 'AX ACCESS NEEDED';
+  const menuError = snapshot.error || '';
+  menuState.textContent = snapshot.ok
+    ? (snapshot.menus?.length ? 'AX MENU · LIVE' : 'NO MENU ITEMS')
+    : menuError === 'accessibility-permission-required' ? 'AX ACCESS NEEDED'
+      : menuError === 'menu-bar-unavailable' ? 'MENU BAR UNAVAILABLE'
+        : menuError === 'source-window-unavailable' ? 'WINDOW UNAVAILABLE'
+          : `MENU ERROR · ${menuError || 'UNKNOWN'}`;
   menuRoot.replaceChildren();
   for (const menu of snapshot.menus || []) {
     const group = document.createElement('div');
@@ -484,9 +490,9 @@ async function refreshSpatialMenu(sourceId = activeCaptureId) {
     const snapshot = await window.horizon.menuSnapshot(sourceId);
     if (sequence !== menuRefreshSequence) return;
     renderSpatialMenu(snapshot, sourceId);
-  } catch {
+  } catch (error) {
     if (sequence !== menuRefreshSequence) return;
-    renderSpatialMenu({ ok: false, menus: [] }, sourceId);
+    renderSpatialMenu({ ok: false, error: error.message, menus: [] }, sourceId);
   }
 }
 
@@ -1830,6 +1836,7 @@ connectButton.addEventListener('click', () => {
   if (!trackingEnabled) trackingStatus.classList.remove('live');
 });
 function applyInputStatus(status) {
+  const wasEnabled = inputEnabled;
   inputEnabled = Boolean(status?.trusted);
   shortcutsInputStatus.textContent = inputEnabled
     ? 'Accessibility access granted · app clicks and keys are enabled.'
@@ -1846,6 +1853,7 @@ function applyInputStatus(status) {
     clearInterval(permissionPoll);
     permissionPoll = null;
   }
+  if (inputEnabled !== wasEnabled) refreshSpatialMenu();
 }
 
 async function refreshInputStatus() {
@@ -1989,6 +1997,8 @@ window.horizon.onInputError((error) => {
     trackingState.textContent = 'Accessibility permission is required for app input';
   } else if (error === 'source-window-unavailable') {
     trackingState.textContent = 'Original app window is no longer available';
+  } else if (error === 'target-not-frontmost') {
+    trackingState.textContent = 'macOS did not focus that app · unlock the Mac or bring its original window forward';
   } else if (error) {
     trackingState.textContent = `App input interrupted · ${error}`;
   }

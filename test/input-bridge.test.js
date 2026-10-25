@@ -36,3 +36,22 @@ test('input bridge keeps click boundaries ordered while replacing queued pointer
   assert.deepEqual(await Promise.all([down, lastMove, up]), [{ id: 1, ok: true }, { id: 2, ok: true }, { id: 3, ok: true }]);
   bridge.stop();
 });
+
+test('input bridge can launch a packaged helper outside the app archive', async () => {
+  let launchedPath;
+  const bridge = new InputBridge({
+    executablePath: '/Applications/XR Shell.app/Contents/Resources/input-bridge',
+    spawnProcess: (executablePath) => {
+      launchedPath = executablePath;
+      const child = new EventEmitter();
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      child.stdin = new PassThrough();
+      child.kill = () => child.emit('exit', 0);
+      return child;
+    }
+  });
+  bridge.start();
+  assert.equal(launchedPath, '/Applications/XR Shell.app/Contents/Resources/input-bridge');
+  bridge.stop();
+});

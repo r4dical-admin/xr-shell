@@ -11,11 +11,12 @@ class InputBridge {
     this.queue = [];
     this.active = null;
     this.spawnProcess = options.spawnProcess || spawn;
+    this.executablePath = options.executablePath || path.join(__dirname, '.build', 'input-bridge');
   }
 
   start() {
     if (this.process && !this.process.killed) return;
-    this.process = this.spawnProcess(path.join(__dirname, '.build', 'input-bridge'), [], { stdio: ['pipe', 'pipe', 'pipe'] });
+    this.process = this.spawnProcess(this.executablePath, [], { stdio: ['pipe', 'pipe', 'pipe'] });
     const lines = readline.createInterface({ input: this.process.stdout });
     lines.on('line', (line) => {
       let message;

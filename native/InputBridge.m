@@ -150,17 +150,25 @@ static void CollectElements(AXUIElementRef element, CGRect bounds, NSString *pat
 
 static AXUIElementRef BestAccessibilityWindow(AXUIElementRef application, CGRect bounds) {
     id windowObject = CopyAttribute(application, kAXWindowsAttribute);
-    NSArray *windows = [windowObject isKindOfClass:NSArray.class] ? windowObject : @[];
+    NSMutableArray *windows = [NSMutableArray arrayWithArray:[windowObject isKindOfClass:NSArray.class] ? windowObject : @[]];
+    for (NSString *attribute in @[(__bridge NSString *)kAXFocusedWindowAttribute, (__bridge NSString *)kAXMainWindowAttribute]) {
+        id value = CopyAttribute(application, (__bridge CFStringRef)attribute);
+        if (value && CFGetTypeID((__bridge CFTypeRef)value) == AXUIElementGetTypeID() && ![windows containsObject:value]) {
+            [windows addObject:value];
+        }
+    }
     AXUIElementRef bestWindow = NULL;
     double bestScore = DBL_MAX;
     for (id candidateObject in windows) {
         AXUIElementRef candidate = (__bridge AXUIElementRef)candidateObject;
         CGRect candidateFrame;
         if (!ElementFrame(candidate, &candidateFrame)) continue;
-        double score = fabs(CGRectGetMinX(candidateFrame) - CGRectGetMinX(bounds))
-            + fabs(CGRectGetMinY(candidateFrame) - CGRectGetMinY(bounds))
-            + fabs(CGRectGetWidth(candidateFrame) - CGRectGetWidth(bounds))
-            + fabs(CGRectGetHeight(candidateFrame) - CGRectGetHeight(bounds));
+        // CGWindow bounds and AX frames can use different display scaling.
+        // Compare each candidate in the CG coordinate space before choosing it.
+        double scale = CGRectGetWidth(bounds) / MAX(1.0, CGRectGetWidth(candidateFrame));
+        double score = fabs(CGRectGetMinX(candidateFrame) * scale - CGRectGetMinX(bounds))
+            + fabs(CGRectGetMinY(candidateFrame) * scale - CGRectGetMinY(bounds))
+            + fabs(CGRectGetHeight(candidateFrame) * scale - CGRectGetHeight(bounds));
         if (score < bestScore) { bestScore = score; bestWindow = candidate; }
     }
     if (bestWindow) CFRetain(bestWindow);
@@ -213,8 +221,11 @@ static NSDictionary *WindowMetrics(uint32_t windowID) {
         AXUIElementSetMessagingTimeout(application, 0.8);
         AXUIElementRef window = BestAccessibilityWindow(application, bounds);
         if (window) {
+            CGRect axBounds = bounds;
+            ElementFrame(window, &axBounds);
             double bestScore = 0;
-            FindTerminalContentTop(window, bounds, 0, &bestScore, &cropTop);
+            FindTerminalContentTop(window, axBounds, 0, &bestScore, &cropTop);
+            cropTop *= CGRectGetHeight(bounds) / MAX(1.0, CGRectGetHeight(axBounds));
             CFRelease(window);
         }
         CFRelease(application);
@@ -233,7 +244,7 @@ static BOOL RaiseTargetWindow(uint32_t windowID) {
     CGRect bounds;
     if (!WindowDetails(windowID, &pid, &bounds)) return NO;
     NSRunningApplication *running = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
-    BOOL ok = [running activateWithOptions:0];
+    BOOL ok = [running activateWithOptions:NSApplicationActivateAllWindows];
     AXUIElementRef application = AXUIElementCreateApplication(pid);
     AXUIElementSetMessagingTimeout(application, 0.8);
     if (AXUIElementSetAttributeValue(application, kAXFrontmostAttribute, kCFBooleanTrue) == kAXErrorSuccess) ok = YES;
@@ -245,6 +256,14 @@ static BOOL RaiseTargetWindow(uint32_t windowID) {
     }
     CFRelease(application);
     return ok;
+}
+
+static BOOL WaitForFrontmostApplication(pid_t pid) {
+    for (NSUInteger attempt = 0; attempt < 20; attempt++) {
+        if (NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier == pid) return YES;
+        usleep(25000);
+    }
+    return NO;
 }
 
 static NSDictionary *ResizeTargetWindow(uint32_t windowID, double scaleX, double scaleY) {
@@ -289,11 +308,37 @@ static NSDictionary *AccessibilitySnapshot(uint32_t windowID) {
     AXUIElementSetMessagingTimeout(application, 0.8);
     AXUIElementRef bestWindow = BestAccessibilityWindow(application, bounds);
     if (!bestWindow) {
+        CFTypeRef rawWindows = NULL;
+        CFTypeRef rawFocused = NULL;
+        CFTypeRef rawMain = NULL;
+        AXError windowsError = AXUIElementCopyAttributeValue(application, kAXWindowsAttribute, &rawWindows);
+        AXError focusedError = AXUIElementCopyAttributeValue(application, kAXFocusedWindowAttribute, &rawFocused);
+        AXError mainError = AXUIElementCopyAttributeValue(application, kAXMainWindowAttribute, &rawMain);
+        NSUInteger windowCount = rawWindows && CFGetTypeID(rawWindows) == CFArrayGetTypeID() ? CFArrayGetCount(rawWindows) : 0;
+        AXError positionError = kAXErrorNoValue;
+        AXError sizeError = kAXErrorNoValue;
+        if (windowCount) {
+            AXUIElementRef firstWindow = (AXUIElementRef)CFArrayGetValueAtIndex(rawWindows, 0);
+            CFTypeRef position = NULL;
+            CFTypeRef size = NULL;
+            positionError = AXUIElementCopyAttributeValue(firstWindow, kAXPositionAttribute, &position);
+            sizeError = AXUIElementCopyAttributeValue(firstWindow, kAXSizeAttribute, &size);
+            if (position) CFRelease(position);
+            if (size) CFRelease(size);
+        }
+        if (rawWindows) CFRelease(rawWindows);
+        if (rawFocused) CFRelease(rawFocused);
+        if (rawMain) CFRelease(rawMain);
         CFRelease(application);
-        return @{@"ok": @NO, @"error": @"accessibility-window-unavailable"};
+        return @{@"ok": @NO, @"error": @"accessibility-window-unavailable",
+                 @"axWindowsError": @(windowsError), @"axFocusedError": @(focusedError),
+                 @"axMainError": @(mainError), @"axWindowCount": @(windowCount),
+                 @"axPositionError": @(positionError), @"axSizeError": @(sizeError)};
     }
     NSMutableArray *elements = [NSMutableArray array];
-    CollectElements(bestWindow, bounds, @"0", 0, elements);
+    CGRect axBounds = bounds;
+    ElementFrame(bestWindow, &axBounds);
+    CollectElements(bestWindow, axBounds, @"0", 0, elements);
     NSRunningApplication *running = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
     NSString *windowTitle = CleanString(CopyAttribute(bestWindow, kAXTitleAttribute), 200) ?: @"";
     NSDictionary *snapshot = @{
@@ -368,24 +413,12 @@ static int ObserveWindow(uint32_t windowID) {
     if (!WindowDetails(windowID, &pid, &bounds)) { Emit(@{@"ready": @NO, @"error": @"source-window-unavailable"}); return 3; }
     AXUIElementRef application = AXUIElementCreateApplication(pid);
     AXUIElementSetMessagingTimeout(application, 0.8);
-    id windowObject = CopyAttribute(application, kAXWindowsAttribute);
-    NSArray *windows = [windowObject isKindOfClass:NSArray.class] ? windowObject : @[];
-    AXUIElementRef bestWindow = NULL;
-    double bestScore = DBL_MAX;
-    for (id candidateObject in windows) {
-        AXUIElementRef candidate = (__bridge AXUIElementRef)candidateObject;
-        CGRect candidateFrame;
-        if (!ElementFrame(candidate, &candidateFrame)) continue;
-        double score = fabs(CGRectGetMinX(candidateFrame) - CGRectGetMinX(bounds))
-            + fabs(CGRectGetMinY(candidateFrame) - CGRectGetMinY(bounds))
-            + fabs(CGRectGetWidth(candidateFrame) - CGRectGetWidth(bounds))
-            + fabs(CGRectGetHeight(candidateFrame) - CGRectGetHeight(bounds));
-        if (score < bestScore) { bestScore = score; bestWindow = candidate; }
-    }
+    AXUIElementRef bestWindow = BestAccessibilityWindow(application, bounds);
     if (!bestWindow) { CFRelease(application); Emit(@{@"ready": @NO, @"error": @"accessibility-window-unavailable"}); return 4; }
 
     AXObserverRef observer = NULL;
     if (AXObserverCreate(pid, ObserverCallback, &observer) != kAXErrorSuccess || !observer) {
+        CFRelease(bestWindow);
         CFRelease(application);
         Emit(@{@"ready": @NO, @"error": @"observer-unavailable"});
         return 5;
@@ -410,7 +443,9 @@ static int ObserveWindow(uint32_t windowID) {
         (__bridge NSString *)kAXRowCountChangedNotification,
         (__bridge NSString *)kAXSelectedCellsChangedNotification
     ];
-    ObserverContext context = { .windowBounds = bounds };
+    CGRect axBounds = bounds;
+    ElementFrame(bestWindow, &axBounds);
+    ObserverContext context = { .windowBounds = axBounds };
     NSMutableSet *supported = [NSMutableSet set];
     for (id elementObject in elements) {
         AXUIElementRef element = (__bridge AXUIElementRef)elementObject;
@@ -425,6 +460,7 @@ static int ObserveWindow(uint32_t windowID) {
     CFRunLoopRun();
     CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, kCFRunLoopDefaultMode);
     CFRelease(observer);
+    CFRelease(bestWindow);
     CFRelease(application);
     return 0;
 }
@@ -511,12 +547,22 @@ static BOOL ActivateAtPoint(pid_t pid, CGPoint point, NSInteger button, uint32_t
     if (!WindowDetails(windowID, &verifiedPID, &bounds) || verifiedPID != pid) return NO;
     AXUIElementRef application = AXUIElementCreateApplication(pid);
     AXUIElementSetMessagingTimeout(application, 0.8);
-    AXUIElementRef hit = NULL;
-    if (AXUIElementCopyElementAtPosition(application, point.x, point.y, &hit) != kAXErrorSuccess || !hit) {
-        AXUIElementRef window = BestAccessibilityWindow(application, bounds);
-        hit = window ? CopyDeepestElementAtPoint(window, point, 0) : NULL;
-        if (window) CFRelease(window);
+    AXUIElementRef window = BestAccessibilityWindow(application, bounds);
+    CGPoint axPoint = point;
+    CGRect axBounds;
+    if (window && ElementFrame(window, &axBounds)) {
+        double nx = (point.x - CGRectGetMinX(bounds)) / MAX(1.0, CGRectGetWidth(bounds));
+        double ny = (point.y - CGRectGetMinY(bounds)) / MAX(1.0, CGRectGetHeight(bounds));
+        axPoint = CGPointMake(CGRectGetMinX(axBounds) + nx * CGRectGetWidth(axBounds),
+                              CGRectGetMinY(axBounds) + ny * CGRectGetHeight(axBounds));
     }
+    AXUIElementRef hit = NULL;
+    if (window) hit = CopyDeepestElementAtPoint(window, axPoint, 0);
+    if (hit && window && CFEqual(hit, window)) { CFRelease(hit); hit = NULL; }
+    if (!hit && (AXUIElementCopyElementAtPosition(application, axPoint.x, axPoint.y, &hit) != kAXErrorSuccess || !hit)) {
+        hit = NULL;
+    }
+    if (window) CFRelease(window);
     CFRelease(application);
     if (!hit) return NO;
 
@@ -528,7 +574,7 @@ static BOOL ActivateAtPoint(pid_t pid, CGPoint point, NSInteger button, uint32_t
             handled = AXUIElementPerformAction(current, kAXShowMenuAction) == kAXErrorSuccess;
         } else if (button == 0 && ([role isEqualToString:(__bridge NSString *)kAXTextFieldRole]
                    || [role isEqualToString:(__bridge NSString *)kAXTextAreaRole])) {
-            handled = FocusAndPlaceCaret(current, point);
+            handled = FocusAndPlaceCaret(current, axPoint);
         } else if (button == 0 && HasAction(current, kAXPressAction)) {
             handled = AXUIElementPerformAction(current, kAXPressAction) == kAXErrorSuccess;
         }
@@ -561,7 +607,7 @@ static BOOL PostScroll(NSDictionary *command, pid_t pid, CGPoint point) {
     return YES;
 }
 
-static BOOL PostText(NSDictionary *command, pid_t pid) {
+static BOOL PostText(NSDictionary *command) {
     NSString *text = command[@"text"];
     if (!text.length) return NO;
     CGEventRef down = CGEventCreateKeyboardEvent(NULL, 0, true);
@@ -575,15 +621,15 @@ static BOOL PostText(NSDictionary *command, pid_t pid) {
     CGEventFlags flags = Flags(command[@"modifiers"]);
     CGEventSetFlags(down, flags);
     CGEventSetFlags(up, flags);
-    CGEventPostToPid(pid, down);
-    CGEventPostToPid(pid, up);
+    CGEventPost(kCGHIDEventTap, down);
+    CGEventPost(kCGHIDEventTap, up);
     free(characters);
     CFRelease(down);
     CFRelease(up);
     return YES;
 }
 
-static BOOL PostKey(NSDictionary *command, pid_t pid) {
+static BOOL PostKey(NSDictionary *command) {
     CGKeyCode keyCode = (CGKeyCode)[command[@"keyCode"] unsignedShortValue];
     CGEventRef down = CGEventCreateKeyboardEvent(NULL, keyCode, true);
     CGEventRef up = CGEventCreateKeyboardEvent(NULL, keyCode, false);
@@ -591,8 +637,8 @@ static BOOL PostKey(NSDictionary *command, pid_t pid) {
     CGEventFlags flags = Flags(command[@"modifiers"]);
     CGEventSetFlags(down, flags);
     CGEventSetFlags(up, flags);
-    CGEventPostToPid(pid, down);
-    CGEventPostToPid(pid, up);
+    CGEventPost(kCGHIDEventTap, down);
+    CGEventPost(kCGHIDEventTap, up);
     CFRelease(down);
     CFRelease(up);
     return YES;
@@ -755,8 +801,14 @@ int main(int argc, const char *argv[]) {
                     continue;
                 }
                 if ([type isEqualToString:@"raise-window"]) {
-                    BOOL ok = RaiseTargetWindow([command[@"windowId"] unsignedIntValue]);
-                    Emit(@{ @"id": requestID, @"ok": @(ok), @"error": ok ? NSNull.null : @"window-raise-failed" });
+                    uint32_t targetWindowID = [command[@"windowId"] unsignedIntValue];
+                    pid_t targetPID = 0;
+                    CGRect targetBounds;
+                    BOOL available = WindowDetails(targetWindowID, &targetPID, &targetBounds);
+                    if (available) RaiseTargetWindow(targetWindowID);
+                    BOOL frontmost = available && WaitForFrontmostApplication(targetPID);
+                    pid_t frontmostPID = NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier;
+                    Emit(@{ @"id": requestID, @"ok": @(frontmost), @"frontmostPID": @(frontmostPID), @"error": frontmost ? NSNull.null : (available ? @"target-not-frontmost" : @"source-window-unavailable") });
                     continue;
                 }
                 if ([type isEqualToString:@"resize-window"]) {
@@ -789,25 +841,33 @@ int main(int argc, const char *argv[]) {
                     Emit(@{@"id": requestID, @"ok": @NO, @"error": @"source-window-unavailable"});
                     continue;
                 }
+                NSString *phase = command[@"phase"] ?: @"move";
+                BOOL requiresFocus = [type isEqualToString:@"activate"] || [type isEqualToString:@"scroll"]
+                    || [type isEqualToString:@"text"] || [type isEqualToString:@"key"]
+                    || ([type isEqualToString:@"pointer"] && [phase isEqualToString:@"down"]);
+                if (requiresFocus) RaiseTargetWindow([command[@"windowId"] unsignedIntValue]);
+                if (requiresFocus && !WaitForFrontmostApplication(pid)) {
+                    Emit(@{@"id": requestID, @"ok": @NO, @"error": @"target-not-frontmost"});
+                    continue;
+                }
                 BOOL ok = NO;
                 if ([type isEqualToString:@"pointer"]) {
-                    NSString *phase = command[@"phase"] ?: @"move";
                     BOOL physical = ![phase isEqualToString:@"move"];
-                    if ([phase isEqualToString:@"down"]) {
-                        RaiseTargetWindow([command[@"windowId"] unsignedIntValue]);
-                        usleep(50000);
-                    }
                     ok = PostPointer(command, pid, point, [command[@"windowId"] unsignedIntValue], physical);
                 }
                 else if ([type isEqualToString:@"activate"]) {
-                    RaiseTargetWindow([command[@"windowId"] unsignedIntValue]);
-                    usleep(50000);
+                    // AXPress can report success without delivering the mouse events
+                    // required by custom controls and embedded web content. After
+                    // raising the native window, send the real click first; use AX
+                    // only when pointer placement or posting is unavailable.
                     ok = PhysicalClick(command, pid, point, [command[@"windowId"] unsignedIntValue]);
-                    if (!ok) ok = ActivateAtPoint(pid, point, [command[@"button"] integerValue], [command[@"windowId"] unsignedIntValue]);
+                    if (!ok && [command[@"button"] integerValue] == 0 && [command[@"clickCount"] integerValue] <= 1) {
+                        ok = ActivateAtPoint(pid, point, 0, [command[@"windowId"] unsignedIntValue]);
+                    }
                 }
-                else if ([type isEqualToString:@"scroll"]) { RaiseTargetWindow([command[@"windowId"] unsignedIntValue]); ok = PostScroll(command, pid, point); }
-                else if ([type isEqualToString:@"text"]) { RaiseTargetWindow([command[@"windowId"] unsignedIntValue]); ok = PostText(command, pid); }
-                else if ([type isEqualToString:@"key"]) { RaiseTargetWindow([command[@"windowId"] unsignedIntValue]); ok = PostKey(command, pid); }
+                else if ([type isEqualToString:@"scroll"]) ok = PostScroll(command, pid, point);
+                else if ([type isEqualToString:@"text"]) ok = PostText(command);
+                else if ([type isEqualToString:@"key"]) ok = PostKey(command);
                 Emit(@{@"id": requestID, @"ok": @(ok), @"error": ok ? NSNull.null : @"unsupported-input"});
             }
         }
