@@ -18,6 +18,7 @@
         <button id="add-window">Add app</button>
         <button id="focus-agent" type="button" aria-pressed="false" title="Clear app windows and jump to the agent session">Agent</button>
         <button id="open-shortcuts">Shortcuts</button>
+        <button id="open-privacy" type="button">Privacy</button>
         <button id="open-widgets">Widgets</button>
         <button id="open-file-reader" type="button" title="Open a local text, Markdown, or JSON file in an XR widget">Read file</button>
         <select id="shell-theme-picker" aria-label="XR Shell theme" title="Change XR Shell theme">
@@ -141,6 +142,15 @@
       <header><div><small>PERSISTENT AGENT UI</small><h2>Saved spatial widgets</h2></div><button type="button" data-widgets-close aria-label="Close">×</button></header>
       <p>Saved widgets remain available after their creating agent finishes. Turn them on or off locally, or delete them permanently.</p>
       <div id="widget-library-list" class="widget-library-list"></div>
+    </dialog>
+    <dialog id="analytics-dialog" class="xr-dialog analytics-dialog" aria-labelledby="analytics-title">
+      <header><div><small>YOUR CHOICE</small><h2 id="analytics-title">Share basic XR Shell usage?</h2></div><button type="button" id="analytics-close" aria-label="Close">×</button></header>
+      <div class="analytics-content">
+        <p id="analytics-status">Analytics is off until you choose to allow it.</p>
+        <p>If you allow it, XR Shell sends Google Analytics a first-use event, an event each time the app opens, and the time XR Shell is active in the foreground. A random installation ID and app version are included. No chat text, app or window names, file paths, or keystrokes are sent. Google may also process network metadata such as your IP address.</p>
+        <p>You can turn this off here at any time. These counts start when you opt in; earlier launches are not reported.</p>
+      </div>
+      <footer><button type="button" id="analytics-decline">Don't share</button><button type="button" class="primary" id="analytics-allow">Allow analytics</button></footer>
     </dialog>
     <script src="a2ui-runtime.js"></script>
     <script src="progress.js"></script>

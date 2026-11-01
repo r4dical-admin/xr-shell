@@ -80,6 +80,8 @@ const chatSend = document.getElementById('chat-send');
 const chatResponse = document.getElementById('chat-response');
 const sessionList = document.getElementById('session-list');
 const shortcutsDialog = document.getElementById('shortcuts-dialog');
+const analyticsDialog = document.getElementById('analytics-dialog');
+const analyticsStatusText = document.getElementById('analytics-status');
 const shortcutsInputStatus = document.getElementById('shortcuts-input-status');
 const liveWindowSummary = document.getElementById('live-window-summary');
 const liveWindowCount = document.getElementById('live-window-count');
@@ -2078,6 +2080,37 @@ document.getElementById('open-shortcuts').addEventListener('click', () => {
 });
 shortcutsDialog.querySelector('[data-shortcuts-close]').addEventListener('click', () => shortcutsDialog.close());
 document.getElementById('shortcuts-open-accessibility').addEventListener('click', () => enableInputButton.click());
+let analyticsStatus = { available: false, consent: 'unset' };
+function renderAnalyticsChoice() {
+  analyticsStatusText.textContent = analyticsStatus.consent === 'granted'
+    ? 'Analytics is on. You can turn it off below.'
+    : analyticsStatus.consent === 'denied'
+      ? 'Analytics is off. No usage events are sent.'
+      : 'Analytics is off until you choose to allow it.';
+  document.getElementById('analytics-decline').textContent = analyticsStatus.consent === 'granted' ? 'Turn off analytics' : "Don't share";
+  document.getElementById('analytics-allow').hidden = analyticsStatus.consent === 'granted';
+}
+document.getElementById('open-privacy').addEventListener('click', () => {
+  renderAnalyticsChoice();
+  analyticsDialog.showModal();
+});
+document.getElementById('analytics-close').addEventListener('click', () => analyticsDialog.close());
+document.getElementById('analytics-decline').addEventListener('click', async () => {
+  try { analyticsStatus = await window.horizon.analyticsConsent('denied'); analyticsDialog.close(); }
+  catch { analyticsStatusText.textContent = 'Could not save this choice. Analytics remains off.'; }
+});
+document.getElementById('analytics-allow').addEventListener('click', async () => {
+  try { analyticsStatus = await window.horizon.analyticsConsent('granted'); analyticsDialog.close(); }
+  catch { analyticsStatusText.textContent = 'Could not save this choice. Analytics remains off.'; }
+});
+window.horizon.analyticsStatus().then((status) => {
+  analyticsStatus = status;
+  document.getElementById('open-privacy').hidden = !status.available;
+  if (status.available && status.consent === 'unset' && !analyticsDialog.open) {
+    renderAnalyticsChoice();
+    analyticsDialog.showModal();
+  }
+}).catch(() => { document.getElementById('open-privacy').hidden = true; });
 document.querySelectorAll('.quick-actions [data-prompt]').forEach((button) => button.addEventListener('click', () => {
   chatInput.value = button.dataset.prompt;
   chatInput.focus();

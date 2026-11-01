@@ -4,6 +4,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('horizon', {
   isPreviewMode: () => ipcRenderer.invoke('app:preview-mode'),
+  analyticsStatus: () => ipcRenderer.invoke('analytics:status'),
+  analyticsConsent: (choice) => ipcRenderer.invoke('analytics:consent', choice),
   inputStatus: () => ipcRenderer.invoke('input:status'),
   enableInput: () => ipcRenderer.invoke('input:enable'),
   openInputSettings: () => ipcRenderer.invoke('input:open-settings'),

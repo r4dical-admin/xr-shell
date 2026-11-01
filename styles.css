@@ -310,6 +310,9 @@ article header b { font-size: 10px; color: var(--muted); font-weight: 400; }
 .shortcuts-content p { margin: 8px 0; font-size: 12px; line-height: 1.55; }
 .shortcuts-content code { color: var(--ink); }
 .shortcuts-permission button { margin-top: 7px; }
+.analytics-content { padding: 18px 22px 4px; }
+.analytics-content p { margin: 0 0 13px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.analytics-content p:first-child { color: var(--ink); }
 
 /* Shell themes provide the palette for both the environment and captured-window FX. */
 body[data-shell-theme="brass"] {

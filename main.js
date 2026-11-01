@@ -3,7 +3,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
-const { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, shell, systemPreferences } = require('electron');
+const { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, session, shell, systemPreferences } = require('electron');
 const { ControlServer } = require('./control-server');
 const { progressSocketPath, PROGRESS_METHODS } = require('./progress-socket');
 const { HeadTracker } = require('./tracking');
@@ -13,6 +13,7 @@ const { ProfileObserver } = require('./profile-observer');
 const { ChatRunner, parseBackend } = require('./chat-runner');
 const { ScriptRunner, scriptRequest } = require('./script-runner');
 const { readReadableFile } = require('./file-reader');
+const { UsageAnalytics, createGoogleTagTransport } = require('./usage-analytics');
 
 let mainWindow;
 let chatRunner;
@@ -27,6 +28,7 @@ const inputBridge = new InputBridge({ executablePath: helperPath });
 const inspectionBridge = new InputBridge({ executablePath: helperPath });
 const statusBridge = new InputBridge({ executablePath: helperPath });
 let profileStore;
+let usageAnalytics;
 const profilers = new Map();
 const CHAT_BACKEND = parseBackend(process.argv);
 const tracker = new HeadTracker((value) => {
@@ -361,9 +363,19 @@ function createWindow() {
     });
   }
   mainWindow.on('closed', () => { mainWindow = undefined; tracker.stop(false); });
+  mainWindow.on('focus', () => usageAnalytics?.focus());
+  mainWindow.on('blur', () => usageAnalytics?.blur());
+  mainWindow.on('closed', () => usageAnalytics?.closeWindow());
 }
 
 app.whenReady().then(() => {
+  usageAnalytics = new UsageAnalytics({
+    filePath: path.join(app.getPath('userData'), 'analytics-consent.json'),
+    version: app.getVersion(),
+    enabled: process.env.HORIZON_CAPTURE !== '1' && (app.isPackaged || process.env.XR_SHELL_ANALYTICS_DEV === '1'),
+    createTransport: (measurementId, clientId) => createGoogleTagTransport(
+      BrowserWindow, session.fromPartition('xr-shell-analytics'), measurementId, clientId)
+  });
   profileStore = new ProfileStore(path.join(app.isPackaged ? app.getPath('userData') : __dirname, 'integration-profiles'));
   chatRunner = new ChatRunner({
     backend: CHAT_BACKEND,
@@ -376,6 +388,13 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle('app:preview-mode', () => process.env.HORIZON_CAPTURE === '1');
+  ipcMain.handle('analytics:status', () => usageAnalytics.status());
+  ipcMain.handle('analytics:consent', (event, choice) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Invalid analytics request');
+    const status = usageAnalytics.setConsent(choice);
+    if (status.consent === 'granted' && mainWindow.isFocused()) usageAnalytics.focus();
+    return status;
+  });
   ipcMain.handle('input:status', () => statusBridge.request({ type: 'status', prompt: false }));
   ipcMain.handle('input:enable', () => statusBridge.request({ type: 'status', prompt: true }));
   ipcMain.handle('input:open-settings', () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'));
@@ -497,6 +516,7 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+  usageAnalytics.start();
   controlServer = new ControlServer({ onRequest: handleControlRequest });
   controlServer.start();
   progressServer = new ControlServer({ socketPath: progressSocketPath(), onRequest: (method, params) => {
@@ -518,6 +538,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  usageAnalytics?.shutdown();
   controlServer?.stop();
   progressServer?.stop();
   for (const pending of controlPending.values()) {
