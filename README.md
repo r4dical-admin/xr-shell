@@ -4,13 +4,13 @@ A native Electron proof of concept for a panoramic workspace that is wider than 
 
 ## Demo
 
-[![Watch the XR Shell demo](assets/backgrounds/horizon.jpg)](artifacts/xr-shell-demo.mp4)
+[![Watch the XR Shell spatial demo](assets/backgrounds/horizon.jpg)](artifacts/xr-shell-spatial-demo.mp4)
 
-**[Watch or download the 48-second XR Shell feature demo →](artifacts/xr-shell-demo.mp4)**
+**[Watch or download the spatial-motion demo →](artifacts/xr-shell-spatial-demo.mp4)** The capture shows the XR workspace panning, switching themes, and pulling in a live Terminal window. The sample Planner and Metrics content is illustrative; the Terminal window and shell UI are real.
 
-**[Watch or download the spatial-motion demo →](artifacts/xr-shell-spatial-demo.mp4)** The capture shows the XR workspace panning, switching themes, and pulling in a live Terminal window. The earlier sample Planner and Metrics content is illustrative; the Terminal window and shell UI are real.
+**[Watch the earlier 48-second feature walkthrough →](artifacts/xr-shell-demo.mp4)** This older walkthrough includes an app-reskin prototype that has since been replaced by the current FX/Tint controls.
 
-The walkthrough highlights the panoramic head-tracked canvas, live macOS window capture, native input and spatial window controls, chat-to-A2UI widget creation, Codex and local MCP control, the shared application menu, and all five shell themes. Its app-specific reskin segment shows the archived prototype and no longer matches the current FX/Tint controls.
+The feature walkthrough highlights the panoramic head-tracked canvas, live macOS window capture, native input and spatial window controls, chat-to-A2UI widget creation, Codex and local MCP control, the shared application menu, and all five shell themes.
 
 Open macOS windows can be brought into the workspace as live, interactive surfaces. Choose a window in the top toolbar and select **Add app**. macOS requests Screen Recording permission the first time. The mirror receives futuristic spatial chrome, depth, scan lines, color treatment and glow without modifying the original application bundle.
 
